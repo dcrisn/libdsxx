@@ -1,75 +1,164 @@
 #pragma once
 
-#include "tarp/intrusive.hpp"
-#include <cstdint>
+/**************************************************************************.
+ * Dllist - general-purpose intrusive doubly-linked list                   |
+ *                                                                         |
+ * NOTE: this is the C++ version of the C-based dllist structure in        |
+ * libtarp. The implementation and documentation has been taken from there |
+ * and adjusted as appropriate. See:                                       |
+ * libtarp/include/tarp/dllist.h.                                          |
+ *                                                                         |
+ * === API ===                                                             |
+ *---------------------                                                    |
+ *                                                                         |
+ * ~ Notes ~                                                               |
+ *                                                                         |
+ * The dllist is headed by a `dllist` structure, used to store various     |
+ * fields for algorithmic efficiency. For example size() becomes O(1)      |
+ * rather than O(n) by storing a size field in this structure.             |
+ * The dllist, as the name implies, is a doubly-linked list (of            |
+ * `dlnode`s intrusively embedded inside the user's own structures.        |
+ *                                                                         |
+ *  ~ Example ~                                                            |
+ *                                                                         |
+ *    struct mystruct{                                                     |
+ *       uint32_t u;                                                       |
+ *       dlnode link;  // must embed a struct dlnode                       |
+ *    };                                                                   |
+ *                                                                         |
+ *    dllist<mystruct, dlnode, &mystruct::link> fifo;                      |
+ *    dllist<mystruct, dlnode, &mystruct::link> lifo;                      |
+ *                                                                         |
+ *    // the dllist is non-owning; so typically you have one               |
+ *    // owning structure of some kind, and any number of                  |
+ *    // non-owning structures. OR you can of course manually              |
+ *    // manage allocation & deallocation via new and delete.              |
+ *    std::vector<std::unique_ptr<mystruct>> owner;                        |
+ *    for (size_t i=0; i< 10; ++i){                                        |
+ *       auto a = std::make_unique<mystruct>();                            |
+ *       auto b = std::make_unique<mystruct>();                            |
+ *       a->u = i; b->u = i;                                               |
+ *       lifo.push_back(*a);   // stack push                               |
+ *       fifo.push_back(*b);   // queue enqueue                            |
+ *       owner.push_back(std::move(a));                                    |
+ *       owner.push_back(std::move(b));                                    |
+ *    }                                                                    |
+ *                                                                         |
+ *   for (auto &elem: lifo.iter()){                                        |
+ *      std::cerr << "LIFO value: " << elem.u << std::endl;                |
+ *   }                                                                     |
+ *                                                                         |
+ *   for (size_t i=0; i < 10; ++i){                                        |
+ *       auto *a = lifo.pop_back();                                        |
+ *       std::cerr << "popped " << a->u << std::endl;                      |
+ *                                                                         |
+ *       a = fifo.pop_front();                                             |
+ *       std::cerr << "dequeued " << a->u << std::endl;                    |
+ *   }                                                                     |
+ *  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~        |
+ *                                                                         |
+ *                                                                         |
+ * === RUNTIME COMPLEXITY CHARACTERISTICS ===                              |
+ *---------------------------------------------                            |
+ * The dllist has two link pointers per node. At the cost of additional    |
+ * space and pointer-manipulation overhead, the structure is more general  |
+ * and allows (compared to a staq, see libtarp): |
+ * - insertion and deletion at either end (deque)                          |
+ * - removal of any node; insertion before and after any node. This is     |
+ *   possible even while iterating.                                        |
+ * - more efficient bidirectional rotation + rotation to specific node     |
+ * - bidirectional iteration                                               |
+ *                                                                         |
+ * clear                    O(1)                                           |
+ * size                     O(1)                                           |
+ * empty                    O(1)                                           |
+ * {front,back}             O(1)                                           |
+ * push_front               O(1)                                           |
+ * push_back                O(1)                                           |
+ * pop_front                O(1)                                           |
+ * pop_back                 O(1)                                           |
+ * unlink                   O(1)                                           |
+ * foreach                  O(n)                                           |
+ * put_after                O(1)                                           |
+ * put_before               O(1)                                           |
+ * replace                  O(1)                                           |
+ * swap (list)              O(1)                                           |
+ * swap (node)              O(1)                                           |
+ * join                     O(1)                                           |
+ * split                    O(n)                                           |
+ * upend                    O(n)                                           |
+ * rotate                   O(n)                                           |
+ * rotateto                 O(1)                                           |
+ * find_nth                 O(n)                                           |
+ *                                                                         |
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ |
+ *                                                                         |
+ * ~ NOTES ~                                                               |
+ *                                                                         |
+ * Some of the operations are perhaps more efficient than their big-O      |
+ * complexity suggests.                                                    |
+ * - rotate() is linear simply because it calls Dll_find_nth. LESS than    |
+ *   the length of the list is traversed exactly once. The number of       |
+ *   pointers changed for the actual rotation is otherwise constant.       |
+ * - split() is linear but LESS than the length of the original list is    |
+ *   traversed exactly once. Pointer manipulation for the actual split is  |
+ *   otherwise constant.                                                   |
+ *************************************************************************/
+
+#include "intrusive.hpp"
 #include <stdexcept>
-#include <tuple>
 
 namespace tarp {
 
+// forward declaration
 template<typename Parent, auto Member_ptr>
 class dllist;
 
+// intrusive doubly linked list node.
+// Any data structure that wants to be linked into
+// one or more intrusive doubly linked lists must embed
+// one or more nodes of this type.
 struct dlnode {
-    template<typename Parent, auto Member_ptr>
-    auto *container() {
-        return container_of<Parent, dlnode, Member_ptr>(this);
-    }
-
     bool is_linked() const { return prev != nullptr || next != nullptr; }
-
-    void unlink(auto &list) {
-        if (is_linked() || list.front_equals(*this) ||
-            list.back_equals(*this)) {
-            list.unlink(*this);
-        }
-    }
 
     struct dlnode *next = nullptr;
     struct dlnode *prev = nullptr;
 };
 
+// Intrusive doubly linked list template class.
+// This is templated in order to avoid having to
+// manually specify container_of calls everywhere which
+// would be both more inconvenient and more error prone.
+//
+// -> Parent
+// The container type that embeds a dlnode which makes it
+// part of this list.
+//
+// -> MemberPtr
+// A pointer to the dlnode member of Parent (pointer to member).
+//
+// These 2 parameters are used internally in container_of calls.
 template<typename Parent, auto MemberPtr>
 class dllist final {
 public:
+    // Forward iterator over dllist.
     struct iterator {
         dlnode *ptr = nullptr;
 
-        dlnode &operator*() const { return *ptr; }
+        iterator(dlnode *node) : ptr(node) {}
 
-        dlnode *operator->() const { return ptr; }
+        // Replace the current iterator pointer.
+        void assign(dlnode *node) { ptr = node; }
 
-        iterator &operator++() {
-            if (ptr) ptr = ptr->next;
-            return *this;
+        // Replace the current iterator pointer.
+        void assign(Parent *obj) {
+            if (obj) {
+                auto &node = (*obj).*MemberPtr;
+                ptr = &node;
+            } else {
+                ptr = nullptr;
+            }
         }
-
-        bool operator!=(const iterator &other) const {
-            return ptr != other.ptr;
-        }
-    };
-
-    struct reverse_iterator {
-        dlnode *ptr = nullptr;
-
-        dlnode &operator*() const { return *ptr; }
-
-        dlnode *operator->() const { return ptr; }
-
-        reverse_iterator &operator++() {
-            if (ptr) ptr = ptr->prev;
-            return *this;
-        }
-
-        bool operator!=(const reverse_iterator &other) const {
-            return ptr != other.ptr;
-        }
-    };
-
-    struct container_iterator {
-        container_iterator(dlnode *first) { ptr = first; }
-
-        dlnode *ptr = nullptr;
 
         Parent &operator*() const {
             return *(tarp::container_of<Parent, dlnode, MemberPtr>(ptr));
@@ -87,16 +176,16 @@ public:
             return tarp::container_of<Parent, dlnode, MemberPtr>(ptr);
         }
 
-        container_iterator &operator++() {
+        iterator &operator++() {
             if (ptr) ptr = ptr->next;
             return *this;
         }
 
-        bool operator!=(const container_iterator &other) const {
+        bool operator!=(const iterator &other) const {
             return ptr != other.ptr;
         }
 
-        container_iterator erase(dllist &list) {
+        iterator erase(dllist &list) {
             if (ptr == nullptr) {
                 return *this;
             }
@@ -107,112 +196,58 @@ public:
         }
     };
 
-    struct container_reverse_iterator {
-        container_reverse_iterator(dlnode &last) : ptr(&last) {}
+    // Reverse iterator over dllist.
+    struct reverse_iterator {
+        dlnode *ptr = nullptr;
 
-        dlnode *ptr;
+        reverse_iterator(dlnode *node) : ptr(node) {}
 
-        Parent *operator*() const {
-            return container_of<Parent, dlnode, MemberPtr>(ptr);
+        void assign(dlnode *node) { ptr = node; }
+
+        void assign(Parent *obj) {
+            if (obj) {
+                auto &node = (*obj).*MemberPtr;
+                ptr = &node;
+            } else {
+                ptr = nullptr;
+            }
         }
 
-        container_reverse_iterator &operator++() {
+        Parent &operator*() const {
+            return *(tarp::container_of<Parent, dlnode, MemberPtr>(ptr));
+        }
+
+        Parent &operator*() {
+            return *(tarp::container_of<Parent, dlnode, MemberPtr>(ptr));
+        }
+
+        Parent *operator->() const {
+            return tarp::container_of<Parent, dlnode, MemberPtr>(ptr);
+        }
+
+        Parent *operator->() {
+            return tarp::container_of<Parent, dlnode, MemberPtr>(ptr);
+        }
+
+        iterator &operator++() {
             if (ptr) ptr = ptr->prev;
             return *this;
         }
 
-        bool operator!=(const container_reverse_iterator &other) const {
+        bool operator!=(const iterator &other) const {
             return ptr != other.ptr;
         }
 
-        container_reverse_iterator erase(dllist &list) {
+        iterator erase(dllist &list) {
             if (ptr == nullptr) {
                 return *this;
             }
             const auto curr = ptr;
-            ptr = ptr->prev;
+            ptr = ptr->next;
             list.unlink(*curr);
             return *this;
         }
     };
-
-    auto iter() {
-        struct it {
-            it(dlnode *first) : start(first) {}
-
-            dlnode *start = nullptr;
-
-            auto begin() { return container_iterator {start}; }
-
-            auto end() { return container_iterator {nullptr}; }
-
-            auto iterator(Parent *current) {
-                if (!current) {
-                    return container_iterator(nullptr);
-                }
-
-                auto *node = &((*current).*MemberPtr);
-                return container_iterator {node};
-            }
-        };
-
-        return it(m_front);
-    }
-
-    auto iter() const {
-        struct it {
-            it(dlnode *first) : start(first) {}
-
-            dlnode *start = nullptr;
-
-            auto begin() const { return container_iterator {start}; }
-
-            auto end() const { return container_iterator {nullptr}; }
-
-            auto iterator(Parent *current) {
-                if (!current) {
-                    return container_iterator(nullptr);
-                }
-
-                auto *node = &((*current).*MemberPtr);
-                return container_iterator {node};
-            }
-        };
-
-        return it(m_front);
-    }
-
-    auto riter() {
-        struct it {
-            it(dlnode *last) : start(last) {}
-
-            dlnode *start = nullptr;
-
-            auto begin() { return container_reverse_iterator {start}; }
-
-            auto end() { return container_reverse_iterator {nullptr}; }
-
-            auto iterator(dlnode *current) {
-                return container_reverse_iterator {current};
-            }
-        };
-
-        return it(m_back);
-    }
-
-    auto riter() const {
-        struct it {
-            it(dlnode *last) : start(last) {}
-
-            dlnode *start = nullptr;
-
-            auto begin() const { return container_reverse_iterator {start}; }
-
-            auto end() const { return container_reverse_iterator {nullptr}; }
-        };
-
-        return it(m_back);
-    }
 
     iterator begin() const { return {m_front}; }
 
@@ -222,6 +257,9 @@ public:
 
     reverse_iterator rend() const { return {nullptr}; }
 
+    // Unlink the element associated to by the given iterator.
+    // If it is the end iterator (nullptr), nothing is done.
+    // Return an iterator to the element following the erased one.
     iterator erase(iterator it) {
         if (!it.ptr) {
             return end();
@@ -233,6 +271,10 @@ public:
         return it;
     }
 
+    // Unlink the element associated to by the given iterator.
+    // If it is the end iterator (nullptr), nothing is done.
+    // Return an iterator to the next element, i.e. the element
+    // preceding the erased one, since this is a reverse iterator.
     reverse_iterator erase(reverse_iterator it) {
         if (!it.ptr) {
             return rend();
@@ -244,22 +286,11 @@ public:
         return it;
     }
 
-    template<typename Pred>
-    void erase_if() {
-        for (auto it = begin(); it != end();) {
-            if (Pred(*it)) {
-                it = erase(it);
-            } else {
-                ++it;
-            }
-        }
-    }
-
+    // Erase all elements for which pred returns true.
     template<typename Pred>
     void erase_if(Pred &&pred) {
         for (auto it = begin(); it != end();) {
-            auto cont = it->template container<Parent, MemberPtr>();
-            if (pred(cont)) {
+            if (pred(*it)) {
                 it = erase(it);
             } else {
                 ++it;
@@ -267,28 +298,22 @@ public:
         }
     }
 
-#if 0
+    // Invoke f for each element in the list.
     template<typename F>
     void for_each(F &&f) {
-        for (auto it = begin(); it != end();) {
-            f(*it);
-            ++it;
-        }
-    }
-#endif
-
-    template<typename F>
-    void for_each(F &&f) {
-        for (auto it = begin(); it != end();) {
-            auto cont = it->template container<Parent, MemberPtr>();
-            f(*cont);
-            ++it;
+        for (auto &cont : *this) {
+            f(cont);
         }
     }
 
+    // Copy constructor and copy assigment operator disabled.
+    // We cannot have the same exact dlnode in multiple lists
+    // for obious reasons: its .next and .prev would get mutated
+    // in both places.
     dllist(const dllist &) = delete;
     dllist &operator=(const dllist &) = delete;
 
+    // Move constructor and move assignment operator enabled.
     dllist(dllist &&other) { swap(other); }
 
     dllist &operator=(dllist &&other) {
@@ -298,42 +323,53 @@ public:
 
     dllist() = default;
 
+    // Given a pointer to a node, get a pointer to its parent container.
     Parent *get_container(dlnode *node) {
         return tarp::container_of<Parent, dlnode, MemberPtr>(node);
     }
 
+    // Given a pointer to a node, get a pointer to its parent container.
     Parent *get_container(dlnode *node) const {
         return tarp::container_of<Parent, dlnode, MemberPtr>(node);
     }
 
+    // Given a reference to a node, get a reference to its parent container.
     Parent &container_of(dlnode &node) {
         return *(tarp::container_of<Parent, dlnode, MemberPtr>(&node));
     }
 
+    // Given a reference to a node, get a reference to its parent container.
     const Parent &container_of(const dlnode &node) {
         return *(tarp::container_of<Parent, dlnode, MemberPtr>(&node));
     }
 
-    static Parent &get_parent(dlnode &node) {
-        return *(tarp::container_of<Parent, dlnode, MemberPtr>(&node));
-    }
-
-    static const Parent &get_parent(const dlnode &node) {
-        return *(tarp::container_of<Parent, dlnode, MemberPtr>(&node));
-    }
-
+    // Remove and return the last element in the list.
+    // Null if the list is empty.
     Parent *pop_back();
 
+    // Remove and return the first element in the list.
+    // Null if the list is empty.
     Parent *pop_front();
 
+    // Get reference to the first element in the list.
+    // This must not be called on an empty list.
     auto &front() { return this->container_of(*m_front); }
 
+    // Get reference to the first element in the list.
+    // This must not be called on an empty list.
     auto &front() const { return this->container_of(*m_front); }
 
+    // Get reference to the last element in the list.
+    // This must not be called on an empty list.
     auto &back() { return this->container_of(*m_back); }
 
+    // Get reference to the last element in the list.
+    // This must not be called on an empty list.
     auto &back() const { return this->container_of(*m_back); }
 
+    // True if the front of the list has the same address
+    // as the given node.
+    // This must not be called on an empty list.
     bool front_equals(const dlnode &node) const {
         if (m_count == 0) {
             return false;
@@ -341,13 +377,19 @@ public:
         return m_front == &node;
     }
 
+    // True if the front of the list has the same address
+    // as the given element.
+    // This must not be called on an empty list.
     bool front_equals(const Parent &ref) const {
         if (m_count == 0) {
             return false;
         }
-        return (this->get_container(m_front)) == &ref;
+        return get_container(m_front) == &ref;
     }
 
+    // True if the tail of the list has the same address
+    // as the given node.
+    // This must not be called on an empty list.
     bool back_equals(const dlnode &node) const {
         if (m_count == 0) {
             return false;
@@ -355,6 +397,9 @@ public:
         return m_back == &node;
     }
 
+    // True if the tail of the list has the same address
+    // as the given element.
+    // This must not be called on an empty list.
     bool back_equals(const Parent &ref) const {
         if (m_count == 0) {
             return false;
@@ -362,46 +407,85 @@ public:
         return &(this->container_of(m_front)) == &ref;
     }
 
+    // Prepend the element to the front of the list.
     void push_front(Parent &);
 
+    // Append the element to the back of the list.
     void push_back(Parent &);
 
-    // only unlinks, does not free anything.
+    // Reset the list so that it is empty.
+    // Note this only discards all links: nothing is actually
+    // destructed or freed (deallocated) since the dllist is
+    // non-owning.
     void clear() {
         m_front = m_back = nullptr;
         m_count = 0;
     }
 
+    // Return the number of elements in the list.
     std::size_t size() const { return m_count; }
 
+    // True if the number of elements in the list is 0.
     bool empty() const { return m_count <= 0; }
 
+    // Apend all elements in other to the end of the
+    // current list, such that other's front is joined
+    // to the back of this.
+    // After the operation other will be empty.
     void join(dllist &other);
 
+    // Given a reference to the element in the list,
+    // remove elem and all other elements following it
+    // from the current list and move them to a new list,
+    // with elem as its front. Return the new list.
+    dllist split(Parent &elem);
+
+    // Rotate the the list in the specified direction <num_rotations>
+    // times.
+    // if dir>0, rotate toward the front of the list;
+    // if dir<0, rotate toward the back.
     void rotate(int dir, std::size_t num_rotations);
 
-    void rotate_to(dlnode &);
-    void rotate_to(Parent &);
+    // Given a reference to an element in the list, rotate
+    // the list such that elem ends up at the front.
+    void rotate_to(Parent &elem);
 
+    // Return a pointer to the nth element in the list.
+    // nullptr if no such element exists.
     Parent *find_nth(std::size_t n);
 
-    dllist split(Parent &);
-
+    // Reverse all elements in the list.
     void upend();
 
-    void unlink(dlnode &);
-    void unlink(Parent &);
+    // Given a referce to an element in the list, unlink the element
+    // such that it is no longer part of the list.
+    void unlink(Parent &elem);
 
+    // Given a reference to a node not currently in the list,
+    // insert it into the list after node_before.
     void put_after(Parent &node_before, Parent &node);
+
+    // Given a reference to a node not currently in the list,
+    // insert it into the list before node_after.
     void put_before(Parent &node_after, Parent &node);
 
+    // Given a reference to a node that exists in the list (a)
+    // and a node that does not exist in the list (b),
+    // replace a with b in the list. After the operation
+    // b exists in the list where a used to b, and a is no
+    // longer in the list.
     Parent *replace(Parent &a, Parent &b);
 
+    // Given a reference to two nodes a and b that both
+    // exist in the list, switch their positions.
     void swap(Parent &a, Parent &b);
-    void swap(dlnode &a, dlnode &b);
+
+    // Swap the contents of this and other, including the
+    // size field and all links.
     void swap(dllist &other);
 
 private:
+    void swap(dlnode &a, dlnode &b);
     void swap_list_heads(dllist &other);
     static std::size_t count_list_nodes(dllist &list);
     dlnode *find_nth_node(std::size_t n);
@@ -418,14 +502,22 @@ private:
     dlnode *pop_front_node();
     dlnode *pop_back_node();
 
+    void rotate_to(dlnode &);
+
+    void unlink(dlnode &);
+
 private:
+    // number of elements in list
     std::size_t m_count = 0;
+
+    // list head
     dlnode *m_front = nullptr;
+
+    // list tail
     dlnode *m_back = nullptr;
 };
 
 //
-
 
 template<typename Parent, auto MemberPtr>
 dlnode *dllist<Parent, MemberPtr>::pop_front_node() {
@@ -810,5 +902,4 @@ void dllist<Parent, MemberPtr>::swap(Parent &a, Parent &b) {
     auto &node_b = b.*MemberPtr;
     swap(node_a, node_b);
 }
-
 };  // namespace tarp

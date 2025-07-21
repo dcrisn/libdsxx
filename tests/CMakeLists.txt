@@ -12,6 +12,7 @@ MACRO(CONFIGURE_TARGET tgname output_dir lib_deps)
 
     target_include_directories(${tgname} PRIVATE
             ${PROJECT_SOURCE_DIR}/src/
+            ${PROJECT_SOURCE_DIR}/include/
     )
 
     target_link_libraries(${tgname}

@@ -27,10 +27,6 @@ struct testnode {
         ptr->num = numval;
         return ptr;
     }
-
-    static testnode *container(dlnode &node) {
-        return node.container<testnode, &testnode::link>();
-    }
 };
 
 using dllist = tarp::dllist<testnode, &testnode::link>;
@@ -198,7 +194,7 @@ TEST_CASE("test count,push,pop") {
     }
 }
 
-// test clear and destrog
+// test clear and destroy
 TEST_CASE("test list destruction") {
     dllist list;
     std::vector<std::unique_ptr<testnode>> owner;
@@ -218,7 +214,7 @@ TEST_CASE("test list destruction") {
     REQUIRE(sz == N);
 
     for (auto &node : owner) {
-        node->link.unlink(list);
+        list.unlink(*node);
         node.reset();
         REQUIRE(list.size() == sz - 1);
         --sz;
@@ -415,8 +411,8 @@ TEST_CASE("test for each forward iteration") {
     constexpr size_t num = 9;
     for (size_t i = 1; i <= num; ++i) {
         auto node = testnode::make(i);
-        //std::cerr << "pushing node: " << static_cast<void *>(node.get())
-        //          << std::endl;
+        // std::cerr << "pushing node: " << static_cast<void *>(node.get())
+        //           << std::endl;
         list.push_back(*node);
         owner.push_back(std::move(node));
     }
@@ -426,8 +422,7 @@ TEST_CASE("test for each forward iteration") {
      * replace items with values ==3 and ==4 with nodes with values 0xff
      * insert 0x01 before items with values 5 and 6
      * insert 0x2 after items with values 5 and 6 */
-    auto iterator = list.iter();
-    for (auto it = iterator.begin(); it != iterator.end();) {
+    for (auto it = list.begin(); it != list.end();) {
         if (it->num <= 2 || it->num >= 7) {
             it.erase(list);
             continue;
@@ -436,15 +431,13 @@ TEST_CASE("test for each forward iteration") {
         else if (it->num == 3 || it->num == 4) {
             auto tmp = testnode::make(0xff);
             auto node = list.replace(*it, *tmp);
-
-            it = iterator.iterator(node);
+            it.assign(node);
             owner.push_back(std::move(tmp));
         }
         ++it;
     }
 
-    iterator = list.iter();
-    for (auto it = iterator.begin(); it != iterator.end(); ++it) {
+    for (auto it = list.begin(); it != list.end(); ++it) {
         if (it->num == 5 || it->num == 6) {
             auto tmp1 = testnode::make(0x1);
             list.put_before(*it, *tmp1);
@@ -463,7 +456,7 @@ TEST_CASE("test for each forward iteration") {
                     std::format("expected {} got {}", num - 1, list.size()));
 
     list.for_each([]([[maybe_unused]] const auto &cont) {
-        //std::cerr << std::format("cont->num={}\n", cont.num);
+        // std::cerr << std::format("cont->num={}\n", cont.num);
     });
 
     std::vector<std::size_t> values = {
