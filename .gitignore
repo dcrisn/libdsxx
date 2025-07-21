@@ -1,0 +1,8 @@
+build/*
+tag*
+build*
+external*
+.cache*
+logs
+valgrind*
+compile_commands.json
