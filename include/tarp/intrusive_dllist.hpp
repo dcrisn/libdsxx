@@ -119,6 +119,7 @@ class dllist;
 // one or more intrusive doubly linked lists must embed
 // one or more nodes of this type.
 struct dlnode {
+    dlnode() = default;
     bool is_linked() const { return prev != nullptr || next != nullptr; }
 
     struct dlnode *next = nullptr;

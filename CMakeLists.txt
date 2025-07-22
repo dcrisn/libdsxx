@@ -30,6 +30,7 @@ add_compile_options(
     -fdiagnostics-color=always
     -Wno-format-truncation
     -Wold-style-cast
+    -O3
 )
 
 add_definitions(
