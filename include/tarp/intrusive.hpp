@@ -29,7 +29,7 @@ concept SafelyOffsettable = is_safely_offsettable<Parent, Member, Ptr>::value;
 template<typename Parent, typename Member, Member Parent::*member_ptr>
 constexpr std::ptrdiff_t member_offset() {
     static_assert(is_safely_offsettable<Parent, Member, member_ptr>::value,
-                  "Unsafe use of member_to_parent: illegal layout");
+                  "Unsafe use of member_offset: illegal layout");
 
     // Compute offset using pointer-to-member.
     // For the ->* syntax, see
