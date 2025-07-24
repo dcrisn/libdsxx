@@ -120,6 +120,7 @@ class dllist;
 // one or more nodes of this type.
 struct dlnode {
     dlnode() = default;
+
     bool is_linked() const { return prev != nullptr || next != nullptr; }
 
     struct dlnode *next = nullptr;
@@ -146,13 +147,13 @@ public:
     struct iterator {
         dlnode *ptr = nullptr;
 
-        iterator(dlnode *node) : ptr(node) {}
+        iterator(dlnode *node) noexcept : ptr(node) {}
 
         // Replace the current iterator pointer.
-        void assign(dlnode *node) { ptr = node; }
+        void assign(dlnode *node) noexcept { ptr = node; }
 
         // Replace the current iterator pointer.
-        void assign(Parent *obj) {
+        void assign(Parent *obj) noexcept {
             if (obj) {
                 auto &node = (*obj).*MemberPtr;
                 ptr = &node;
@@ -161,32 +162,42 @@ public:
             }
         }
 
-        Parent &operator*() const {
+        Parent &operator*() const noexcept {
             return *(tarp::container_of<Parent, dlnode, MemberPtr>(ptr));
         }
 
-        Parent &operator*() {
+        Parent &operator*() noexcept {
             return *(tarp::container_of<Parent, dlnode, MemberPtr>(ptr));
         }
 
-        Parent *operator->() const {
+        Parent *operator->() const noexcept {
             return tarp::container_of<Parent, dlnode, MemberPtr>(ptr);
         }
 
-        Parent *operator->() {
+        Parent *operator->() noexcept {
             return tarp::container_of<Parent, dlnode, MemberPtr>(ptr);
         }
 
-        iterator &operator++() {
-            if (ptr) ptr = ptr->next;
+        iterator &operator++() noexcept {
+            // it is the caller's responsibility not to increment
+            // an end iterator. Checking here would be safer but slower
+            // in tight loops.
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#endif
+            ptr = ptr->next;
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
             return *this;
         }
 
-        bool operator!=(const iterator &other) const {
+        bool operator!=(const iterator &other) const noexcept {
             return ptr != other.ptr;
         }
 
-        iterator erase(dllist &list) {
+        iterator erase(dllist &list) noexcept {
             if (ptr == nullptr) {
                 return *this;
             }
@@ -201,11 +212,11 @@ public:
     struct reverse_iterator {
         dlnode *ptr = nullptr;
 
-        reverse_iterator(dlnode *node) : ptr(node) {}
+        reverse_iterator(dlnode *node) noexcept : ptr(node) {}
 
-        void assign(dlnode *node) { ptr = node; }
+        void assign(dlnode *node) noexcept { ptr = node; }
 
-        void assign(Parent *obj) {
+        void assign(Parent *obj) noexcept {
             if (obj) {
                 auto &node = (*obj).*MemberPtr;
                 ptr = &node;
@@ -214,32 +225,42 @@ public:
             }
         }
 
-        Parent &operator*() const {
+        Parent &operator*() const noexcept {
             return *(tarp::container_of<Parent, dlnode, MemberPtr>(ptr));
         }
 
-        Parent &operator*() {
+        Parent &operator*() noexcept {
             return *(tarp::container_of<Parent, dlnode, MemberPtr>(ptr));
         }
 
-        Parent *operator->() const {
+        Parent *operator->() const noexcept {
             return tarp::container_of<Parent, dlnode, MemberPtr>(ptr);
         }
 
-        Parent *operator->() {
+        Parent *operator->() noexcept {
             return tarp::container_of<Parent, dlnode, MemberPtr>(ptr);
         }
 
-        iterator &operator++() {
-            if (ptr) ptr = ptr->prev;
+        iterator &operator++() noexcept {
+            // it is the caller's responsibility not to increment
+            // an end iterator. Checking here would be safer but slower
+            // in tight loops.
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#endif
+            ptr = ptr->prev;
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
             return *this;
         }
 
-        bool operator!=(const iterator &other) const {
+        bool operator!=(const iterator &other) const noexcept {
             return ptr != other.ptr;
         }
 
-        iterator erase(dllist &list) {
+        iterator erase(dllist &list) noexcept {
             if (ptr == nullptr) {
                 return *this;
             }
@@ -250,18 +271,18 @@ public:
         }
     };
 
-    iterator begin() const { return {m_front}; }
+    iterator begin() const noexcept { return {m_front}; }
 
-    iterator end() const { return {nullptr}; }
+    iterator end() const noexcept { return {nullptr}; }
 
-    reverse_iterator rbegin() const { return {m_back}; }
+    reverse_iterator rbegin() const noexcept { return {m_back}; }
 
-    reverse_iterator rend() const { return {nullptr}; }
+    reverse_iterator rend() const noexcept { return {nullptr}; }
 
     // Unlink the element associated to by the given iterator.
     // If it is the end iterator (nullptr), nothing is done.
     // Return an iterator to the element following the erased one.
-    iterator erase(iterator it) {
+    iterator erase(iterator it) noexcept {
         if (!it.ptr) {
             return end();
         }
@@ -276,7 +297,7 @@ public:
     // If it is the end iterator (nullptr), nothing is done.
     // Return an iterator to the next element, i.e. the element
     // preceding the erased one, since this is a reverse iterator.
-    reverse_iterator erase(reverse_iterator it) {
+    reverse_iterator erase(reverse_iterator it) noexcept {
         if (!it.ptr) {
             return rend();
         }
