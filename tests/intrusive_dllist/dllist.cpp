@@ -12,11 +12,7 @@
 using namespace std;
 
 using std::make_unique;
-using tarp::container_of;
 using tarp::dlnode;
-using tarp::is_safely_offsettable;
-using tarp::is_safely_offsettable_v;
-using tarp::SafelyOffsettable;
 
 struct testnode {
     size_t num = 0;
