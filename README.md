@@ -1,5 +1,5 @@
 # libdsxx
-C++ >=17 data structures library
+C++ >=20 data structures library
 
 This library implements intrusive and non-intrusive data structures in C++.
 An introduction to intrusive data structures in both C and C++ (including
