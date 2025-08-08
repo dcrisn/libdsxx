@@ -833,13 +833,15 @@ Parent *dllist<Parent, MemberPtr>::find_nth(std::size_t n) {
 template<typename Parent, auto MemberPtr>
 void dllist<Parent, MemberPtr>::unlink(dlnode &node) {
     if (m_count <= 0) {
-        throw std::invalid_argument("trying to unlink node from empty list");
+        return;
     }
 
     if (&node == m_front) {
         pop_front();
     } else if (&node == m_back) {
         pop_back();
+    } else if (node.is_linked() == false) {
+        return;
     } else {
         node.next->prev = node.prev;
         node.prev->next = node.next;
