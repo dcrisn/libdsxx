@@ -69,7 +69,7 @@
  * - more efficient bidirectional rotation + rotation to specific node     |
  * - bidirectional iteration                                               |
  *                                                                         |
- * clear                    O(1)                                           |
+ * clear                    O(n)                                           |
  * size                     O(1)                                           |
  * empty                    O(1)                                           |
  * {front,back}             O(1)                                           |
@@ -122,6 +122,8 @@ struct dlnode {
     dlnode() = default;
 
     bool is_linked() const { return prev != nullptr || next != nullptr; }
+
+    void reset() { next = prev = nullptr; }
 
     struct dlnode *next = nullptr;
     struct dlnode *prev = nullptr;
@@ -440,6 +442,13 @@ public:
     // destructed or freed (deallocated) since the dllist is
     // non-owning.
     void clear() {
+        // we explicitly remove every single node so that we reset
+        // each node's links. Otherwise the nodes are left with
+        // dangling pointers and is_linked() will erroneously
+        // return true for a given node!
+        while (!empty()) {
+            pop_front();
+        }
         m_front = m_back = nullptr;
         m_count = 0;
     }
@@ -557,6 +566,7 @@ dlnode *dllist<Parent, MemberPtr>::pop_front_node() {
         break;
     }
     m_count--;
+    node->reset();
     return node;
 }
 
@@ -582,6 +592,7 @@ dlnode *dllist<Parent, MemberPtr>::pop_back_node() {
         break;
     }
     m_count--;
+    node->reset();
     return node;
 }
 
@@ -633,7 +644,9 @@ void dllist<Parent, MemberPtr>::join(dllist &other) {
     }
 
     m_count += other.m_count;
-    other.clear();
+
+    // resets the variables in other.
+    dllist tmp = std::move(other);
 }
 
 template<typename Parent, auto MemberPtr>
@@ -832,6 +845,8 @@ void dllist<Parent, MemberPtr>::unlink(dlnode &node) {
         node.prev->next = node.next;
         m_count--;
     }
+
+    node.reset();
 }
 
 template<typename Parent, auto MemberPtr>
@@ -893,6 +908,7 @@ dlnode *dllist<Parent, MemberPtr>::replace_node(dlnode &a, dlnode &b) {
     if (b.prev) b.prev->next = &b;
     else m_front = &b;
 
+    a.reset();
     return &b;
 }
 
