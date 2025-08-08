@@ -361,7 +361,7 @@ public:
     }
 
     // Given a reference to a node, get a reference to its parent container.
-    const Parent &container_of(const dlnode &node) {
+    const Parent &container_of(const dlnode &node) const {
         return *(tarp::container_of<Parent, dlnode, MemberPtr>(&node));
     }
 
