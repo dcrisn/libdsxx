@@ -646,7 +646,7 @@ void dllist<Parent, MemberPtr>::join(dllist &other) {
     m_count += other.m_count;
 
     // resets the variables in other.
-    dllist tmp = std::move(other);
+    [[maybe_unused]]dllist tmp = std::move(other);
 }
 
 template<typename Parent, auto MemberPtr>
