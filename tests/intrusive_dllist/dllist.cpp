@@ -643,6 +643,63 @@ TEST_CASE("perf") {
     q.clear();
 }
 
+TEST_CASE("test for-range loop") {
+    using namespace std::chrono;
+    SUBCASE("empty list") {
+        bool found = false;
+        dllist list;
+        for (auto &i : list) {
+            if (i.num >= std::numeric_limits<std::size_t>::max()) {
+                found = true;
+                break;
+            }
+        }
+        REQUIRE(!found);
+    }
+
+    SUBCASE("one element in list") {
+        bool found = false;
+        testnode tmp;
+        tmp.num = std::numeric_limits<std::size_t>::max();
+        dllist list;
+        list.push_back(tmp);
+        for (auto &i : list) {
+            if (i.num >= std::numeric_limits<std::size_t>::max()) {
+                found = true;
+                break;
+            }
+        }
+        REQUIRE(found);
+    }
+
+    SUBCASE("many elements") {
+        bool found = false;
+        std::vector<std::unique_ptr<testnode>> owner;
+        constexpr unsigned N = 120;
+        for (unsigned i = 0; i < N; ++i) {
+            auto ptr = std::make_unique<testnode>(i);
+            owner.push_back(std::move(ptr));
+        }
+
+        testnode tmp;
+        tmp.num = std::numeric_limits<std::size_t>::max();
+
+        dllist q;
+        q.push_back(tmp);
+        for (auto &i : owner) {
+            q.push_back(*i);
+        }
+
+        for (auto &i : q) {
+            if (i.num >= std::numeric_limits<std::size_t>::max()) {
+                found = true;
+                break;
+            }
+        }
+        REQUIRE(found == true);
+    }
+}
+
 int main(int argc, char *argv[]) {
     doctest::Context ctx;
 
