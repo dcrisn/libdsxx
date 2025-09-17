@@ -46,4 +46,5 @@ SET(S ${PROJECT_SOURCE_DIR}/src)
 
 add_subdirectory(intrusive)
 add_subdirectory(intrusive_dllist)
+add_subdirectory(lru_cache)
 
