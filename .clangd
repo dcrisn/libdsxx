@@ -1,0 +1,4 @@
+CompileFlags:
+  CompilationDatabase: build
+  # Good fallback if DB is ever missing:
+  Add: [-std=c++20]
