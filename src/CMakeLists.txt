@@ -44,6 +44,7 @@ target_link_libraries(libdsxx PUBLIC
 install(FILES
 	${public_headers}/tarp/intrusive.hpp
 	${public_headers}/tarp/intrusive_dllist.hpp
+	${public_headers}/tarp/lru_cache.hpp
 	DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tarp/
 	)
 
