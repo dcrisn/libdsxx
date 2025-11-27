@@ -126,6 +126,20 @@ TEST_CASE("tarp::lru_cache basic behavior") {
     }
 }
 
+TEST_CASE("value-less lru_cache") {
+    SUBCASE("insert & get: value retrieval and size") {
+        lru_cache<int, void> c(2);
+        c.put(1);
+        c.put(2);
+
+        CAPTURE(c.size());
+        CAPTURE(c.contains(1));
+        CAPTURE(c.contains(2));
+
+        REQUIRE(c.size() == 2);
+    }
+}
+
 int main(int argc, char *argv[]) {
     doctest::Context ctx;
 
