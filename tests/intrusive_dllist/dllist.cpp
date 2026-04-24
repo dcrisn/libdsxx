@@ -27,6 +27,28 @@ struct testnode {
 
 using dllist = tarp::dllist<testnode, &testnode::link>;
 
+TEST_CASE("linked() getter tests"){
+    dllist list;
+    REQUIRE(list.empty());
+    REQUIRE(list.size() == 0);
+
+    auto a = make_unique<testnode>();
+    REQUIRE(a->link.is_linked() == false);
+
+    list.push_back(*a);
+    REQUIRE(a->link.is_linked() == true);
+
+    list.pop_back();
+    REQUIRE(a->link.is_linked() == false);
+
+    list.push_front(*a);
+    REQUIRE(a->link.is_linked() == true);
+
+    list.unlink(*a);
+    REQUIRE(a->link.is_linked() == false);
+    REQUIRE(list.size() == 0);
+}
+
 TEST_CASE("test push_back, pop_back, pop_front") {
     dllist list;
     REQUIRE(list.empty());

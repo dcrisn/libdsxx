@@ -121,12 +121,15 @@ class dllist;
 struct dlnode {
     dlnode() = default;
 
-    bool is_linked() const { return prev != nullptr || next != nullptr; }
+    bool is_linked() const { return prev != this || next != this; }
 
-    void reset() { next = prev = nullptr; }
+    // next=prev=this means unlinked;
+    // next=prev=null means linked as an only node
+    // in a 1-element list.
+    void reset() { next = prev = this; }
 
-    struct dlnode *next = nullptr;
-    struct dlnode *prev = nullptr;
+    struct dlnode *next = this;
+    struct dlnode *prev = this;
 };
 
 // Intrusive doubly linked list template class.
