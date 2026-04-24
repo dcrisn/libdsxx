@@ -40,7 +40,7 @@ struct testnode {
     std::uint32_t black = 0;
 
     // to simulate data
-    std::array<std::uint8_t, PAYLOAD_SIZE> bytes{};
+    std::array<std::uint8_t, PAYLOAD_SIZE> bytes {};
 
     dlnode link;
 
@@ -152,6 +152,7 @@ TEST_CASE("dllist perf comparison") {
         // variables; this therefore prevents optimization
         // (e.g. dead code elimination)
         const auto compute = [](auto &x) {
+            const auto start = steady_clock::now();
             if (sink1 % 2 == 0) {
                 x.black++;
                 sink1 = sink1 + 1;
@@ -161,34 +162,44 @@ TEST_CASE("dllist perf comparison") {
                 sink1 = sink1 - 1;
                 sink2 = sink2 + 2;
             }
+            const auto end = steady_clock::now();
+            return end - start;
         };
 
 
         using namespace std::chrono;
         constexpr std::size_t NUM_PASSES = 10;
         auto measure = [&compute](auto &l) {
+            std::chrono::steady_clock::duration dur {0};
+
             const auto start = steady_clock::now();
             for (unsigned i = 0; i < NUM_PASSES; ++i) {
                 for (auto &x : l) {
-                    compute(x);
+                    dur += compute(x);
                 }
             }
             const auto end = steady_clock::now();
-            const auto elapsed = duration_cast<usecs>(end - start).count();
+
+            // we subtract the time taken by the computation, since
+            // we are only interested in the actual iteration speed
+            const auto elapsed =
+              duration_cast<usecs>((end - start) - dur).count();
 
             return elapsed;
         };
 
         using namespace std::chrono;
         auto measure_ptr = [&compute](auto &l) {
+            std::chrono::steady_clock::duration dur {0};
             const auto start = steady_clock::now();
             for (unsigned i = 0; i < NUM_PASSES; ++i) {
                 for (auto &x : l) {
-                    compute(*x);
+                    dur += compute(*x);
                 }
             }
             const auto end = steady_clock::now();
-            const auto elapsed = duration_cast<usecs>(end - start).count();
+            const auto elapsed =
+              duration_cast<usecs>((end - start) - dur).count();
             return elapsed;
         };
 
@@ -237,7 +248,7 @@ TEST_CASE("dllist perf comparison") {
 #if 1
                                        8 * 1000 * 1000
 #endif
-};
+    };
 
     for (auto count : counts) {
         measurements.push_back(run_test(count));
