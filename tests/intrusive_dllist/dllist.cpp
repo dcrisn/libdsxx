@@ -14,7 +14,11 @@ using namespace std;
 using std::make_unique;
 using tarp::dlnode;
 
-struct testnode {
+struct testnode : public dlnode {
+    testnode(std::size_t n) : num(n) {}
+
+    testnode() : num() {}
+
     size_t num = 0;
     dlnode link;
 
@@ -25,32 +29,57 @@ struct testnode {
     }
 };
 
+// intrusive dllist using container_of
 using dllist = tarp::dllist<testnode, &testnode::link>;
 
-TEST_CASE("linked() getter tests"){
-    dllist list;
+// intrusive dllist using inheritance
+using dllist2 = tarp::dllist<testnode>;
+
+TEST_CASE_TEMPLATE("linked() getter tests", List, dllist, dllist2) {
+    List list;
     REQUIRE(list.empty());
     REQUIRE(list.size() == 0);
 
-    auto a = make_unique<testnode>();
-    REQUIRE(a->link.is_linked() == false);
+    if constexpr (!List::inheritance_hook_v) {
+        auto a = make_unique<testnode>();
+        REQUIRE(a->link.is_linked() == false);
 
-    list.push_back(*a);
-    REQUIRE(a->link.is_linked() == true);
+        list.push_back(*a);
+        REQUIRE(a->link.is_linked() == true);
 
-    list.pop_back();
-    REQUIRE(a->link.is_linked() == false);
+        list.pop_back();
+        REQUIRE(a->link.is_linked() == false);
 
-    list.push_front(*a);
-    REQUIRE(a->link.is_linked() == true);
+        list.push_front(*a);
+        REQUIRE(a->link.is_linked() == true);
 
-    list.unlink(*a);
-    REQUIRE(a->link.is_linked() == false);
-    REQUIRE(list.size() == 0);
+        list.unlink(*a);
+        REQUIRE(a->link.is_linked() == false);
+        REQUIRE(list.size() == 0);
+    } else {
+        auto a = make_unique<testnode>();
+        REQUIRE(a->is_linked() == false);
+
+        list.push_back(*a);
+        REQUIRE(a->is_linked() == true);
+
+        list.pop_back();
+        REQUIRE(a->is_linked() == false);
+
+        list.push_front(*a);
+        REQUIRE(a->is_linked() == true);
+
+        list.unlink(*a);
+        REQUIRE(a->is_linked() == false);
+        REQUIRE(list.size() == 0);
+    }
 }
 
-TEST_CASE("test push_back, pop_back, pop_front") {
-    dllist list;
+TEST_CASE_TEMPLATE("test push_back, pop_back, pop_front",
+                   List,
+                   dllist,
+                   dllist2) {
+    List list;
     REQUIRE(list.empty());
     REQUIRE(list.size() == 0);
 
@@ -68,8 +97,9 @@ TEST_CASE("test push_back, pop_back, pop_front") {
     REQUIRE(a_recovered == a.get());
 }
 
+template<typename List>
 void test_enqdq_pushpop(size_t size, bool reversed_front_back, bool stackmode) {
-    dllist list;
+    List list;
 
     std::vector<std::unique_ptr<testnode>> owner;
 
@@ -122,45 +152,45 @@ void test_enqdq_pushpop(size_t size, bool reversed_front_back, bool stackmode) {
  * Test whether the values we put on the queue and get back from it
  * are consistent with FIFO semantics through a number of enqueue-dequeue
  * operations. Also check the count stays correct throughout. */
-TEST_CASE("test count, enqueue, dequeue") {
+TEST_CASE_TEMPLATE("test count, enqueue, dequeue", List, dllist, dllist2) {
     std::vector<std::size_t> inputs = {
       1, 2, 3, 10, 100, 1000, 100 * 1000, 1000 * 1000};
 
     SUBCASE("DLLIST with len 0") {
-        test_enqdq_pushpop(0, false, true);
-        test_enqdq_pushpop(0, true, false);
+        test_enqdq_pushpop<List>(0, false, true);
+        test_enqdq_pushpop<List>(0, true, false);
     }
     SUBCASE("DLLIST with len 1") {
-        test_enqdq_pushpop(1, false, true);
-        test_enqdq_pushpop(1, true, false);
+        test_enqdq_pushpop<List>(1, false, true);
+        test_enqdq_pushpop<List>(1, true, false);
     }
     SUBCASE("DLLIST with len 2") {
-        test_enqdq_pushpop(2, false, true);
-        test_enqdq_pushpop(2, true, false);
+        test_enqdq_pushpop<List>(2, false, true);
+        test_enqdq_pushpop<List>(2, true, false);
     }
     SUBCASE("DLLIST with len 3") {
-        test_enqdq_pushpop(3, false, true);
-        test_enqdq_pushpop(3, true, false);
+        test_enqdq_pushpop<List>(3, false, true);
+        test_enqdq_pushpop<List>(3, true, false);
     }
     SUBCASE("DLLIST with len 10") {
-        test_enqdq_pushpop(10, false, true);
-        test_enqdq_pushpop(10, true, false);
+        test_enqdq_pushpop<List>(10, false, true);
+        test_enqdq_pushpop<List>(10, true, false);
     }
     SUBCASE("DLLIST with len 100") {
-        test_enqdq_pushpop(100, false, true);
-        test_enqdq_pushpop(100, true, false);
+        test_enqdq_pushpop<List>(100, false, true);
+        test_enqdq_pushpop<List>(100, true, false);
     }
     SUBCASE("DLLIST with len 1000") {
-        test_enqdq_pushpop(1000, false, true);
-        test_enqdq_pushpop(1000, true, false);
+        test_enqdq_pushpop<List>(1000, false, true);
+        test_enqdq_pushpop<List>(1000, true, false);
     }
     SUBCASE("DLLIST with len 100'000") {
-        test_enqdq_pushpop(100'000, false, true);
-        test_enqdq_pushpop(100'000, true, false);
+        test_enqdq_pushpop<List>(100'000, false, true);
+        test_enqdq_pushpop<List>(100'000, true, false);
     }
     SUBCASE("DLLIST with len 1e6") {
-        test_enqdq_pushpop(1000 * 1000, false, true);
-        test_enqdq_pushpop(1000 * 1000, true, false);
+        test_enqdq_pushpop<List>(1000 * 1000, false, true);
+        test_enqdq_pushpop<List>(1000 * 1000, true, false);
     }
 }
 
@@ -168,53 +198,53 @@ TEST_CASE("test count, enqueue, dequeue") {
  * Test whether the values get put on the stack and get back from it
  * are consistent with LIFO semantics through a number of push-pop
  * operations. Also check the count stays correct throughout. */
-TEST_CASE("test count,push,pop") {
+TEST_CASE_TEMPLATE("test count,push,pop", List, dllist, dllist2) {
     SUBCASE("DLLIST with len 0") {
-        test_enqdq_pushpop(0, false, true);
-        test_enqdq_pushpop(0, true, true);
+        test_enqdq_pushpop<List>(0, false, true);
+        test_enqdq_pushpop<List>(0, true, true);
     }
 
     SUBCASE("DLLIST with len 0") {
-        test_enqdq_pushpop(0, false, true);
-        test_enqdq_pushpop(0, true, true);
+        test_enqdq_pushpop<List>(0, false, true);
+        test_enqdq_pushpop<List>(0, true, true);
     }
     SUBCASE("DLLIST with len 1") {
-        test_enqdq_pushpop(1, false, true);
-        test_enqdq_pushpop(1, true, true);
+        test_enqdq_pushpop<List>(1, false, true);
+        test_enqdq_pushpop<List>(1, true, true);
     }
     SUBCASE("DLLIST with len 2") {
-        test_enqdq_pushpop(2, false, true);
-        test_enqdq_pushpop(2, true, true);
+        test_enqdq_pushpop<List>(2, false, true);
+        test_enqdq_pushpop<List>(2, true, true);
     }
     SUBCASE("DLLIST with len 3") {
-        test_enqdq_pushpop(3, false, true);
-        test_enqdq_pushpop(3, true, true);
+        test_enqdq_pushpop<List>(3, false, true);
+        test_enqdq_pushpop<List>(3, true, true);
     }
     SUBCASE("DLLIST with len 10") {
-        test_enqdq_pushpop(10, false, true);
-        test_enqdq_pushpop(10, true, true);
+        test_enqdq_pushpop<List>(10, false, true);
+        test_enqdq_pushpop<List>(10, true, true);
     }
     SUBCASE("DLLIST with len 100") {
-        test_enqdq_pushpop(100, false, true);
-        test_enqdq_pushpop(100, true, true);
+        test_enqdq_pushpop<List>(100, false, true);
+        test_enqdq_pushpop<List>(100, true, true);
     }
     SUBCASE("DLLIST with len 1000") {
-        test_enqdq_pushpop(1000, false, true);
-        test_enqdq_pushpop(1000, true, true);
+        test_enqdq_pushpop<List>(1000, false, true);
+        test_enqdq_pushpop<List>(1000, true, true);
     }
     SUBCASE("DLLIST with len 100'000") {
-        test_enqdq_pushpop(100'000, false, true);
-        test_enqdq_pushpop(100'000, true, true);
+        test_enqdq_pushpop<List>(100'000, false, true);
+        test_enqdq_pushpop<List>(100'000, true, true);
     }
     SUBCASE("DLLIST with len 1e6") {
-        test_enqdq_pushpop(1000 * 1000, false, true);
-        test_enqdq_pushpop(1000 * 1000, true, true);
+        test_enqdq_pushpop<List>(1000 * 1000, false, true);
+        test_enqdq_pushpop<List>(1000 * 1000, true, true);
     }
 }
 
 // test clear and destroy
-TEST_CASE("test list destruction") {
-    dllist list;
+TEST_CASE_TEMPLATE("test list destruction", List, dllist, dllist2) {
+    List list;
     std::vector<std::unique_ptr<testnode>> owner;
 
     constexpr std::size_t N = 10;
@@ -242,8 +272,8 @@ TEST_CASE("test list destruction") {
 }
 
 // test if the nth node can be found
-TEST_CASE("find nth") {
-    dllist list;
+TEST_CASE_TEMPLATE("find nth", List, dllist, dllist2) {
+    List list;
     std::vector<std::unique_ptr<testnode>> owner;
     constexpr std::size_t num = 500;
 
@@ -266,9 +296,9 @@ TEST_CASE("find nth") {
 }
 
 // test reversing the list nodes
-TEST_CASE("test list_upend") {
+TEST_CASE_TEMPLATE("test list_upend", List, dllist, dllist2) {
     auto test = [](std::size_t size) {
-        dllist list;
+        List list;
         std::vector<std::unique_ptr<testnode>> owner;
 
         // numbers get pushed so they decrease front-to-back
@@ -318,6 +348,7 @@ TEST_CASE("test list_upend") {
 // of dir is as this test expects. In other words, when dir=1, rotate toward
 // the front of the list, which we must ensure is also toward the top of the
 // stack ==> use pushfront, popfront, NOT pushback, popback.
+template<typename List>
 void test_list_rotation__(size_t size, size_t rotations, int dir) {
     /* Run 'rotations' number of tests. For each test:
      *  - construct a list of size SIZE with elements that take values
@@ -327,7 +358,7 @@ void test_list_rotation__(size_t size, size_t rotations, int dir) {
      *    have been rotated by num_rotations positions */
     for (size_t num_rotations = 0; num_rotations <= rotations;
          ++num_rotations) {
-        dllist list;
+        List list;
         std::vector<std::unique_ptr<testnode>> owner;
 
         // insert items with values 0...size-1, i.e. all values mod size
@@ -374,10 +405,10 @@ void test_list_rotation__(size_t size, size_t rotations, int dir) {
     }
 }
 
-TEST_CASE("test list rotation") {
+TEST_CASE_TEMPLATE("test list rotation", List, dllist, dllist2) {
     const auto test = [](std::size_t sz) {
-        test_list_rotation__(sz, sz * 2 + 1, 1);
-        test_list_rotation__(sz, sz * 2 + 1, -1);
+        test_list_rotation__<List>(sz, sz * 2 + 1, 1);
+        test_list_rotation__<List>(sz, sz * 2 + 1, -1);
     };
 
     SUBCASE("dllist with len 0") {
@@ -401,8 +432,8 @@ TEST_CASE("test list rotation") {
 }
 
 // rotate list as many times as neeed to make a specified node the front
-TEST_CASE("test list_rotation_to_node") {
-    dllist list;
+TEST_CASE_TEMPLATE("test list_rotation_to_node", List, dllist, dllist2) {
+    List list;
     std::vector<std::unique_ptr<testnode>> owner;
 
     constexpr size_t size = 350;
@@ -422,8 +453,8 @@ TEST_CASE("test list_rotation_to_node") {
 }
 
 // test that modifying the list while iterating over it is fine
-TEST_CASE("test for each forward iteration") {
-    dllist list;
+TEST_CASE_TEMPLATE("test for each forward iteration", List, dllist, dllist2) {
+    List list;
     std::vector<std::unique_ptr<testnode>> owner;
 
     constexpr size_t num = 9;
@@ -489,8 +520,8 @@ TEST_CASE("test for each forward iteration") {
 }
 
 // test that 2 lists can swap he
-TEST_CASE("test swap heads") {
-    dllist a, b;
+TEST_CASE_TEMPLATE("test swap heads", List, dllist, dllist2) {
+    List a, b;
 
     std::vector<std::unique_ptr<testnode>> owner;
 
@@ -531,8 +562,8 @@ TEST_CASE("test swap heads") {
 }
 
 // can front and back be removed and are they freed correctly
-TEST_CASE("remove front and back") {
-    dllist a;
+TEST_CASE_TEMPLATE("remove front and back", List, dllist, dllist2) {
+    List a;
     std::vector<std::unique_ptr<testnode>> owner;
 
     constexpr size_t num = 2300;
@@ -558,9 +589,9 @@ TEST_CASE("remove front and back") {
                     std::format("expected {} got {}", 0, a.size()));
 }
 
-TEST_CASE("test list join") {
-    dllist a;
-    dllist b;
+TEST_CASE_TEMPLATE("test list join", List, dllist, dllist2) {
+    List a;
+    List b;
     std::vector<std::unique_ptr<testnode>> owner;
 
     constexpr size_t len = 7482;
@@ -600,8 +631,8 @@ TEST_CASE("test list join") {
     }
 }
 
-TEST_CASE("test list split") {
-    dllist a;
+TEST_CASE_TEMPLATE("test list split", List, dllist, dllist2) {
+    List a;
     std::vector<std::unique_ptr<testnode>> owner;
 
     constexpr size_t len = 15;
@@ -615,7 +646,7 @@ TEST_CASE("test list split") {
     // list breaking off from a; a should be left with len/2 items; the new
     // list should have len/2 items as well (or (len/2)+1, if the len is odd);
     // e.g. if len=15, len(a) should be 7 and len(b) should be 8
-    dllist b = a.split(*a.find_nth((len / 2) + 1));
+    List b = a.split(*a.find_nth((len / 2) + 1));
 
     // round the length up for b since the lenth was divided in half and it
     // could've been truncated if len is odd;
@@ -641,12 +672,12 @@ TEST_CASE("test list split") {
  *  - upend the whole staq
  *  - rotate the staq 100 times to the front/top
  */
-TEST_CASE("perf") {
+TEST_CASE_TEMPLATE("perf", List, dllist, dllist2) {
     constexpr size_t num = 80 * 1000;
     // size_t num = 80 * 1000 * 1000;
     // size_t num = 87;
 
-    dllist q;
+    List q;
     std::vector<std::unique_ptr<testnode>> owner;
 
     for (size_t i = 0; i < num; i++) {
@@ -665,11 +696,11 @@ TEST_CASE("perf") {
     q.clear();
 }
 
-TEST_CASE("test for-range loop") {
+TEST_CASE_TEMPLATE("test for-range loop", List, dllist, dllist2) {
     using namespace std::chrono;
     SUBCASE("empty list") {
         bool found = false;
-        dllist list;
+        List list;
         for (auto &i : list) {
             if (i.num >= std::numeric_limits<std::size_t>::max()) {
                 found = true;
@@ -683,7 +714,7 @@ TEST_CASE("test for-range loop") {
         bool found = false;
         testnode tmp;
         tmp.num = std::numeric_limits<std::size_t>::max();
-        dllist list;
+        List list;
         list.push_back(tmp);
         for (auto &i : list) {
             if (i.num >= std::numeric_limits<std::size_t>::max()) {
@@ -706,7 +737,7 @@ TEST_CASE("test for-range loop") {
         testnode tmp;
         tmp.num = std::numeric_limits<std::size_t>::max();
 
-        dllist q;
+        List q;
         q.push_back(tmp);
         for (auto &i : owner) {
             q.push_back(*i);

@@ -107,11 +107,12 @@
 
 #include "intrusive.hpp"
 #include <stdexcept>
+#include <type_traits>
 
 namespace tarp {
 
 // forward declaration
-template<typename Parent, auto Member_ptr>
+template<typename Parent, auto Member_ptr = nullptr>
 class dllist;
 
 // intrusive doubly linked list node.
@@ -137,6 +138,12 @@ struct dlnode {
 // manually specify container_of calls everywhere which
 // would be both more inconvenient and more error prone.
 //
+// The class works in 2 ways:
+//
+// 1) using container_of to derive a pointer to Parent
+// from a pointer to a dlnode member. This only works with
+// object for which is_standard_layout_v=true.
+//
 // -> Parent
 // The container type that embeds a dlnode which makes it
 // part of this list.
@@ -145,8 +152,41 @@ struct dlnode {
 // A pointer to the dlnode member of Parent (pointer to member).
 //
 // These 2 parameters are used internally in container_of calls.
+//
+// 2) Using inheritance: in this case, Parent is the user object
+// and must publically inherit from dlnode. MemberPtr in this
+// case must be specified as nullptr as it is unnecessary.
+// This method works safely with any object.
 template<typename Parent, auto MemberPtr>
 class dllist final {
+public:
+    static inline constexpr bool inheritance_hook_v =
+      std::is_base_of_v<dlnode, Parent>;
+
+private:
+    static Parent *derive_container(dlnode *node) {
+        // C++ inheritance based: this supports non-standard
+        // layout objects;
+        // Get Parent (the container) back from a pointer to node.
+        if constexpr (inheritance_hook_v) {
+            return static_cast<Parent *>(node);
+        }
+
+        // explicit container_of-based: this only supports
+        // standard-layout objects.
+        else {
+            return tarp::container_of<Parent, dlnode, MemberPtr>(node);
+        }
+    }
+
+    static const Parent *derive_container(dlnode const *node) {
+        if constexpr (inheritance_hook_v) {
+            return static_cast<const Parent *>(*node);
+        } else {
+            return tarp::container_of<Parent, dlnode, MemberPtr>(node);
+        }
+    }
+
 public:
     // Forward iterator over dllist.
     struct iterator {
@@ -160,28 +200,25 @@ public:
         // Replace the current iterator pointer.
         void assign(Parent *obj) noexcept {
             if (obj) {
-                auto &node = (*obj).*MemberPtr;
-                ptr = &node;
+                dlnode *node = nullptr;
+                if constexpr (inheritance_hook_v) {
+                    node = obj;
+                } else {
+                    node = (obj).*MemberPtr;
+                }
+                ptr = node;
             } else {
                 ptr = nullptr;
             }
         }
 
-        Parent &operator*() const noexcept {
-            return *(tarp::container_of<Parent, dlnode, MemberPtr>(ptr));
-        }
+        Parent &operator*() const noexcept { return *derive_container(ptr); }
 
-        Parent &operator*() noexcept {
-            return *(tarp::container_of<Parent, dlnode, MemberPtr>(ptr));
-        }
+        Parent &operator*() noexcept { return *derive_container(ptr); }
 
-        Parent *operator->() const noexcept {
-            return tarp::container_of<Parent, dlnode, MemberPtr>(ptr);
-        }
+        Parent *operator->() const noexcept { return derive_container(ptr); }
 
-        Parent *operator->() noexcept {
-            return tarp::container_of<Parent, dlnode, MemberPtr>(ptr);
-        }
+        Parent *operator->() noexcept { return derive_container(ptr); }
 
         iterator &operator++() noexcept {
             // it is the caller's responsibility not to increment
@@ -223,28 +260,25 @@ public:
 
         void assign(Parent *obj) noexcept {
             if (obj) {
-                auto &node = (*obj).*MemberPtr;
-                ptr = &node;
+                dlnode *node = nullptr;
+                if constexpr (inheritance_hook_v) {
+                    node = obj;
+                } else {
+                    node = (*obj).*MemberPtr;
+                }
+                ptr = node;
             } else {
                 ptr = nullptr;
             }
         }
 
-        Parent &operator*() const noexcept {
-            return *(tarp::container_of<Parent, dlnode, MemberPtr>(ptr));
-        }
+        Parent &operator*() const noexcept { return *derive_container(ptr); }
 
-        Parent &operator*() noexcept {
-            return *(tarp::container_of<Parent, dlnode, MemberPtr>(ptr));
-        }
+        Parent &operator*() noexcept { return *derive_container(ptr); }
 
-        Parent *operator->() const noexcept {
-            return tarp::container_of<Parent, dlnode, MemberPtr>(ptr);
-        }
+        Parent *operator->() const noexcept { return derive_container(ptr); }
 
-        Parent *operator->() noexcept {
-            return tarp::container_of<Parent, dlnode, MemberPtr>(ptr);
-        }
+        Parent *operator->() noexcept { return derive_container(ptr); }
 
         iterator &operator++() noexcept {
             // it is the caller's responsibility not to increment
@@ -351,23 +385,17 @@ public:
     dllist() = default;
 
     // Given a pointer to a node, get a pointer to its parent container.
-    Parent *get_container(dlnode *node) {
-        return tarp::container_of<Parent, dlnode, MemberPtr>(node);
-    }
+    Parent *get_container(dlnode *node) { return derive_container(node); }
 
     // Given a pointer to a node, get a pointer to its parent container.
-    Parent *get_container(dlnode *node) const {
-        return tarp::container_of<Parent, dlnode, MemberPtr>(node);
-    }
+    Parent *get_container(dlnode *node) const { return derive_container(node); }
 
     // Given a reference to a node, get a reference to its parent container.
-    Parent &container_of(dlnode &node) {
-        return *(tarp::container_of<Parent, dlnode, MemberPtr>(&node));
-    }
+    Parent &container_of(dlnode &node) { return *derive_container(node); }
 
     // Given a reference to a node, get a reference to its parent container.
     const Parent &container_of(const dlnode &node) const {
-        return *(tarp::container_of<Parent, dlnode, MemberPtr>(&node));
+        return *derive_container(node);
     }
 
     // Remove and return the last element in the list.
@@ -380,19 +408,19 @@ public:
 
     // Get reference to the first element in the list.
     // This must not be called on an empty list.
-    auto &front() { return this->container_of(*m_front); }
+    auto &front() { return *derive_container(m_front); }
 
     // Get reference to the first element in the list.
     // This must not be called on an empty list.
-    auto &front() const { return this->container_of(*m_front); }
+    auto &front() const { *derive_container(m_front); }
 
     // Get reference to the last element in the list.
     // This must not be called on an empty list.
-    auto &back() { return this->container_of(*m_back); }
+    auto &back() { return *derive_container(m_back); }
 
     // Get reference to the last element in the list.
     // This must not be called on an empty list.
-    auto &back() const { return this->container_of(*m_back); }
+    auto &back() const { return *derive_container(m_back); }
 
     // True if the front of the list has the same address
     // as the given node.
@@ -431,7 +459,7 @@ public:
         if (m_count == 0) {
             return false;
         }
-        return &(this->container_of(m_front)) == &ref;
+        return derive_container(m_front) == &ref;
     }
 
     // Prepend the element to the front of the list.
@@ -616,8 +644,13 @@ void dllist<Parent, MemberPtr>::push_front(dlnode &node) {
 
 template<typename Parent, auto MemberPtr>
 void dllist<Parent, MemberPtr>::push_front(Parent &obj) {
-    auto &node = obj.*MemberPtr;
-    push_front(node);
+    if constexpr (inheritance_hook_v) {
+        dlnode &node = obj;
+        push_front(node);
+    } else {
+        auto &node = obj.*MemberPtr;
+        push_front(node);
+    }
 }
 
 template<typename Parent, auto MemberPtr>
@@ -632,8 +665,13 @@ void dllist<Parent, MemberPtr>::push_back(dlnode &node) {
 
 template<typename Parent, auto MemberPtr>
 void dllist<Parent, MemberPtr>::push_back(Parent &obj) {
-    auto &node = obj.*MemberPtr;
-    push_back(node);
+    if constexpr (inheritance_hook_v) {
+        dlnode &node = obj;
+        push_back(node);
+    } else {
+        auto &node = obj.*MemberPtr;
+        push_back(node);
+    }
 }
 
 template<typename Parent, auto MemberPtr>
@@ -649,7 +687,7 @@ void dllist<Parent, MemberPtr>::join(dllist &other) {
     m_count += other.m_count;
 
     // resets the variables in other.
-    [[maybe_unused]]dllist tmp = std::move(other);
+    [[maybe_unused]] dllist tmp = std::move(other);
 }
 
 template<typename Parent, auto MemberPtr>
@@ -691,8 +729,13 @@ dllist<Parent, MemberPtr> dllist<Parent, MemberPtr>::split(dlnode &node) {
 
 template<typename Parent, auto MemberPtr>
 dllist<Parent, MemberPtr> dllist<Parent, MemberPtr>::split(Parent &obj) {
-    auto &node = obj.*MemberPtr;
-    return split(node);
+    if constexpr (inheritance_hook_v) {
+        dlnode &node = obj;
+        return split(node);
+    } else {
+        auto &node = obj.*MemberPtr;
+        return split(node);
+    }
 }
 
 // swap the contents of this list and b
@@ -786,8 +829,13 @@ void dllist<Parent, MemberPtr>::rotate_to(dlnode &node) {
 
 template<typename Parent, auto MemberPtr>
 void dllist<Parent, MemberPtr>::rotate_to(Parent &obj) {
-    auto &node = obj.*MemberPtr;
-    rotate_to(node);
+    if constexpr (inheritance_hook_v) {
+        dlnode &node = obj;
+        rotate_to(node);
+    } else {
+        auto &node = obj.*MemberPtr;
+        rotate_to(node);
+    }
 }
 
 template<typename Parent, auto MemberPtr>
@@ -856,8 +904,13 @@ void dllist<Parent, MemberPtr>::unlink(dlnode &node) {
 
 template<typename Parent, auto MemberPtr>
 void dllist<Parent, MemberPtr>::unlink(Parent &obj) {
-    auto &node = obj.*MemberPtr;
-    unlink(node);
+    if constexpr (inheritance_hook_v) {
+        dlnode &node = obj;
+        unlink(node);
+    } else {
+        auto &node = obj.*MemberPtr;
+        unlink(node);
+    }
 }
 
 template<typename Parent, auto MemberPtr>
@@ -876,9 +929,15 @@ void dllist<Parent, MemberPtr>::put_after(dlnode &node_before, dlnode &node) {
 
 template<typename Parent, auto MemberPtr>
 void dllist<Parent, MemberPtr>::put_after(Parent &obj_before, Parent &obj) {
-    auto &node_before = obj_before.*MemberPtr;
-    auto &node = obj.*MemberPtr;
-    put_after(node_before, node);
+    if constexpr (inheritance_hook_v) {
+        dlnode &node_before = obj_before;
+        dlnode &node = obj;
+        put_after(node_before, node);
+    } else {
+        auto &node_before = obj_before.*MemberPtr;
+        auto &node = obj.*MemberPtr;
+        put_after(node_before, node);
+    }
 }
 
 template<typename Parent, auto MemberPtr>
@@ -897,9 +956,15 @@ void dllist<Parent, MemberPtr>::put_before(dlnode &node_after, dlnode &node) {
 
 template<typename Parent, auto MemberPtr>
 void dllist<Parent, MemberPtr>::put_before(Parent &obj_after, Parent &obj) {
-    auto &node_after = obj_after.*MemberPtr;
-    auto &node = obj.*MemberPtr;
-    put_before(node_after, node);
+    if constexpr (inheritance_hook_v) {
+        dlnode &node_after = obj_after;
+        dlnode &node = obj;
+        put_before(node_after, node);
+    } else {
+        auto &node_after = obj_after.*MemberPtr;
+        auto &node = obj.*MemberPtr;
+        put_before(node_after, node);
+    }
 }
 
 template<typename Parent, auto MemberPtr>
@@ -919,10 +984,17 @@ dlnode *dllist<Parent, MemberPtr>::replace_node(dlnode &a, dlnode &b) {
 
 template<typename Parent, auto MemberPtr>
 Parent *dllist<Parent, MemberPtr>::replace(Parent &a, Parent &b) {
-    auto &node_a = a.*MemberPtr;
-    auto &node_b = b.*MemberPtr;
-    replace_node(node_a, node_b);
-    return &b;
+    if constexpr (inheritance_hook_v) {
+        dlnode &node_a = a;
+        dlnode &node_b = b;
+        replace_node(node_a, node_b);
+        return &b;
+    } else {
+        auto &node_a = a.*MemberPtr;
+        auto &node_b = b.*MemberPtr;
+        replace_node(node_a, node_b);
+        return &b;
+    }
 }
 
 template<typename Parent, auto MemberPtr>
