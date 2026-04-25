@@ -445,7 +445,7 @@ public:
 
     // Get reference to the first element in the list.
     // This must not be called on an empty list.
-    auto &front() const { *derive_container(m_front); }
+    auto &front() const {return *derive_container(m_front); }
 
     // Get reference to the last element in the list.
     // This must not be called on an empty list.
