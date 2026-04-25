@@ -125,6 +125,8 @@ class dllist;
 // inheritance-based approach.
 template<unsigned Tag>
 struct tagged_dlnode {
+    static inline constexpr unsigned TAG = Tag;
+
     tagged_dlnode() = default;
 
     bool is_linked() const { return prev != this || next != this; }
