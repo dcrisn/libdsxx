@@ -14,7 +14,7 @@ using namespace std;
 using std::make_unique;
 using tarp::dlnode;
 
-struct testnode : public dlnode {
+struct testnode {
     testnode(std::size_t n) : num(n) {}
 
     testnode() : num() {}
@@ -29,19 +29,36 @@ struct testnode : public dlnode {
     }
 };
 
+struct testnode2 : public dlnode {
+    testnode2(std::size_t n) : num(n) {}
+
+    testnode2() : num() {}
+
+    size_t num = 0;
+    dlnode link;
+
+    static auto make(std::size_t numval = 0) {
+        auto ptr = make_unique<testnode2>();
+        ptr->num = numval;
+        return ptr;
+    }
+};
+
 // intrusive dllist using container_of
 using dllist = tarp::dllist<testnode, &testnode::link>;
 
 // intrusive dllist using inheritance
-using dllist2 = tarp::dllist<testnode>;
+using dllist2 = tarp::dllist<testnode2, 0u>;
 
 TEST_CASE_TEMPLATE("linked() getter tests", List, dllist, dllist2) {
     List list;
+    using container_type = List::container_type;
+
     REQUIRE(list.empty());
     REQUIRE(list.size() == 0);
 
     if constexpr (!List::inheritance_hook_v) {
-        auto a = make_unique<testnode>();
+        auto a = make_unique<container_type>();
         REQUIRE(a->link.is_linked() == false);
 
         list.push_back(*a);
@@ -57,7 +74,7 @@ TEST_CASE_TEMPLATE("linked() getter tests", List, dllist, dllist2) {
         REQUIRE(a->link.is_linked() == false);
         REQUIRE(list.size() == 0);
     } else {
-        auto a = make_unique<testnode>();
+        auto a = make_unique<container_type>();
         REQUIRE(a->is_linked() == false);
 
         list.push_back(*a);
@@ -75,15 +92,73 @@ TEST_CASE_TEMPLATE("linked() getter tests", List, dllist, dllist2) {
     }
 }
 
+TEST_CASE("linking into multiple lists without inheritance") {
+    struct mynode {
+        dlnode link1;
+        dlnode link2;
+        dlnode link3;
+    };
+
+    using Lista = tarp::dllist<mynode, &mynode::link1>;
+    using Listb = tarp::dllist<mynode, &mynode::link2>;
+    using Listc = tarp::dllist<mynode, &mynode::link3>;
+    Lista a;
+    Listb b;
+    Listc c;
+
+    auto x = make_unique<mynode>();
+    a.push_back(*x);
+    b.push_back(*x);
+    c.push_back(*x);
+
+    REQUIRE(a.size() == 1);
+    REQUIRE(b.size() == 1);
+    REQUIRE(c.size() == 1);
+
+    REQUIRE(x->link1.is_linked());
+    REQUIRE(x->link2.is_linked());
+    REQUIRE(x->link3.is_linked());
+}
+
+TEST_CASE("linking into multiple lists with inheritance") {
+    using namespace tarp;
+
+    struct mynode
+        : public tagged_dlnode<0>
+        , tagged_dlnode<1>
+        , tagged_dlnode<2> {};
+
+    using Lista = tarp::dllist<mynode, 0>;
+    using Listb = tarp::dllist<mynode, 1>;
+    using Listc = tarp::dllist<mynode, 2>;
+    Lista a;
+    Listb b;
+    Listc c;
+
+    auto x = make_unique<mynode>();
+    a.push_back(*x);
+    b.push_back(*x);
+    c.push_back(*x);
+
+    REQUIRE(a.size() == 1);
+    REQUIRE(b.size() == 1);
+    REQUIRE(c.size() == 1);
+
+    REQUIRE(x->tagged_dlnode<0>::is_linked());
+    REQUIRE(x->tagged_dlnode<1>::is_linked());
+    REQUIRE(x->tagged_dlnode<2>::is_linked());
+}
+
 TEST_CASE_TEMPLATE("test push_back, pop_back, pop_front",
                    List,
                    dllist,
                    dllist2) {
     List list;
+    using container_type = List::container_type;
     REQUIRE(list.empty());
     REQUIRE(list.size() == 0);
 
-    auto a = make_unique<testnode>();
+    auto a = make_unique<container_type>();
     a->num = 1;
 
     list.push_back(*a);
@@ -100,14 +175,15 @@ TEST_CASE_TEMPLATE("test push_back, pop_back, pop_front",
 template<typename List>
 void test_enqdq_pushpop(size_t size, bool reversed_front_back, bool stackmode) {
     List list;
+    using container_type = List::container_type;
 
-    std::vector<std::unique_ptr<testnode>> owner;
+    std::vector<std::unique_ptr<container_type>> owner;
 
     /* push size elements to the list one by one, then pop them
      * off and see if the count remains consistent throughout */
     for (size_t i = 1; i <= size; ++i) {
         // debug("pushing %s %zu", reversed_front_back ? "front" : "back", i);
-        auto node = testnode::make(i);
+        auto node = container_type::make(i);
         if (reversed_front_back) {
             list.push_front(*node);
         } else {
@@ -120,14 +196,14 @@ void test_enqdq_pushpop(size_t size, bool reversed_front_back, bool stackmode) {
     }
 
 #if 0
-    struct testnode *tmp;
-    Dll_foreach(list, tmp, struct testnode, link){
+    struct container_type *tmp;
+    Dll_foreach(list, tmp, struct container_type, link){
         debug("tmp->num %zu", tmp->num);
     }
 #endif
 
     for (size_t i = 1; i <= size; ++i) {
-        struct testnode *node;
+        container_type *node = nullptr;
         if (stackmode) {
             node = reversed_front_back ? list.pop_front() : list.pop_back();
             REQUIRE(node);
@@ -245,13 +321,14 @@ TEST_CASE_TEMPLATE("test count,push,pop", List, dllist, dllist2) {
 // test clear and destroy
 TEST_CASE_TEMPLATE("test list destruction", List, dllist, dllist2) {
     List list;
-    std::vector<std::unique_ptr<testnode>> owner;
+    using container_type = List::container_type;
+    std::vector<std::unique_ptr<container_type>> owner;
 
     constexpr std::size_t N = 10;
 
     // for (size_t i = 0; i < 200'000; ++i) {
     for (size_t i = 0; i < 10; ++i) {
-        auto node = testnode::make(i);
+        auto node = container_type::make(i);
         list.push_front(*node);
         // utdbgprint("PUSH: list.size()=={}, expected={}", list.size(), i+1);
         REQUIRE(list.size() == i + 1);
@@ -274,11 +351,12 @@ TEST_CASE_TEMPLATE("test list destruction", List, dllist, dllist2) {
 // test if the nth node can be found
 TEST_CASE_TEMPLATE("find nth", List, dllist, dllist2) {
     List list;
-    std::vector<std::unique_ptr<testnode>> owner;
+    using container_type = List::container_type;
+    std::vector<std::unique_ptr<container_type>> owner;
     constexpr std::size_t num = 500;
 
     for (size_t i = 1; i <= num; i++) {
-        auto node = testnode::make(i);
+        auto node = container_type::make(i);
         list.push_back(*node);
         owner.push_back(std::move(node));
     }
@@ -299,11 +377,12 @@ TEST_CASE_TEMPLATE("find nth", List, dllist, dllist2) {
 TEST_CASE_TEMPLATE("test list_upend", List, dllist, dllist2) {
     auto test = [](std::size_t size) {
         List list;
-        std::vector<std::unique_ptr<testnode>> owner;
+        using container_type = List::container_type;
+        std::vector<std::unique_ptr<container_type>> owner;
 
         // numbers get pushed so they decrease front-to-back
         for (size_t j = 1; j <= size; ++j) {
-            auto node = testnode::make(j);
+            auto node = container_type::make(j);
             list.push_front(*node);
             owner.push_back(std::move(node));
         }
@@ -359,11 +438,12 @@ void test_list_rotation__(size_t size, size_t rotations, int dir) {
     for (size_t num_rotations = 0; num_rotations <= rotations;
          ++num_rotations) {
         List list;
-        std::vector<std::unique_ptr<testnode>> owner;
+        using container_type = List::container_type;
+        std::vector<std::unique_ptr<container_type>> owner;
 
         // insert items with values 0...size-1, i.e. all values mod size
         for (size_t i = 0; i < size; ++i) {
-            auto node = testnode::make(i);
+            auto node = container_type::make(i);
             list.push_front(*node);
             owner.push_back(std::move(node));
         }
@@ -434,11 +514,12 @@ TEST_CASE_TEMPLATE("test list rotation", List, dllist, dllist2) {
 // rotate list as many times as neeed to make a specified node the front
 TEST_CASE_TEMPLATE("test list_rotation_to_node", List, dllist, dllist2) {
     List list;
-    std::vector<std::unique_ptr<testnode>> owner;
+    using container_type = List::container_type;
+    std::vector<std::unique_ptr<container_type>> owner;
 
     constexpr size_t size = 350;
     for (size_t i = 1; i <= size; ++i) {
-        auto node = testnode::make(i);
+        auto node = container_type::make(i);
         list.push_back(*node);
         owner.push_back(std::move(node));
     }
@@ -455,11 +536,12 @@ TEST_CASE_TEMPLATE("test list_rotation_to_node", List, dllist, dllist2) {
 // test that modifying the list while iterating over it is fine
 TEST_CASE_TEMPLATE("test for each forward iteration", List, dllist, dllist2) {
     List list;
-    std::vector<std::unique_ptr<testnode>> owner;
+    using container_type = List::container_type;
+    std::vector<std::unique_ptr<container_type>> owner;
 
     constexpr size_t num = 9;
     for (size_t i = 1; i <= num; ++i) {
-        auto node = testnode::make(i);
+        auto node = container_type::make(i);
         // std::cerr << "pushing node: " << static_cast<void *>(node.get())
         //           << std::endl;
         list.push_back(*node);
@@ -478,7 +560,7 @@ TEST_CASE_TEMPLATE("test for each forward iteration", List, dllist, dllist2) {
         }
 
         else if (it->num == 3 || it->num == 4) {
-            auto tmp = testnode::make(0xff);
+            auto tmp = container_type::make(0xff);
             auto node = list.replace(*it, *tmp);
             it.assign(node);
             owner.push_back(std::move(tmp));
@@ -488,11 +570,11 @@ TEST_CASE_TEMPLATE("test for each forward iteration", List, dllist, dllist2) {
 
     for (auto it = list.begin(); it != list.end(); ++it) {
         if (it->num == 5 || it->num == 6) {
-            auto tmp1 = testnode::make(0x1);
+            auto tmp1 = container_type::make(0x1);
             list.put_before(*it, *tmp1);
             owner.push_back(std::move(tmp1));
 
-            auto tmp2 = testnode::make(0x2);
+            auto tmp2 = container_type::make(0x2);
             list.put_after(*it, *tmp2);
             owner.push_back(std::move(tmp2));
         }
@@ -522,20 +604,20 @@ TEST_CASE_TEMPLATE("test for each forward iteration", List, dllist, dllist2) {
 // test that 2 lists can swap he
 TEST_CASE_TEMPLATE("test swap heads", List, dllist, dllist2) {
     List a, b;
-
-    std::vector<std::unique_ptr<testnode>> owner;
+    using container_type = List::container_type;
+    std::vector<std::unique_ptr<container_type>> owner;
 
     std::vector<std::uint64_t> vals = {1, 2, 3, 4, 5, 6, 7};
 
     // create 2 lists, one with all items, one only with the last 3, then
     // swap their heads and verify
     for (size_t i = 0; i < vals.size(); ++i) {
-        auto node = testnode::make(vals[i]);
+        auto node = container_type::make(vals[i]);
         a.push_back(*node);
         owner.push_back(std::move(node));
     }
     for (size_t i = vals.size() - 4; i < vals.size(); ++i) {
-        auto node = testnode::make(vals[i]);
+        auto node = container_type::make(vals[i]);
         b.push_back(*node);
         owner.push_back(std::move(node));
     }
@@ -564,14 +646,15 @@ TEST_CASE_TEMPLATE("test swap heads", List, dllist, dllist2) {
 // can front and back be removed and are they freed correctly
 TEST_CASE_TEMPLATE("remove front and back", List, dllist, dllist2) {
     List a;
-    std::vector<std::unique_ptr<testnode>> owner;
+    using container_type = List::container_type;
+    std::vector<std::unique_ptr<container_type>> owner;
 
     constexpr size_t num = 2300;
 
     // add every time both front and back
     for (size_t i = 0; i < num; ++i) {
-        auto nodea = testnode::make();
-        auto nodeb = testnode::make();
+        auto nodea = container_type::make();
+        auto nodeb = container_type::make();
         a.push_back(*nodea);
         a.push_front(*nodeb);
         owner.push_back(std::move(nodea));
@@ -592,15 +675,16 @@ TEST_CASE_TEMPLATE("remove front and back", List, dllist, dllist2) {
 TEST_CASE_TEMPLATE("test list join", List, dllist, dllist2) {
     List a;
     List b;
-    std::vector<std::unique_ptr<testnode>> owner;
+    using container_type = List::container_type;
+    std::vector<std::unique_ptr<container_type>> owner;
 
     constexpr size_t len = 7482;
     for (size_t i = 0; i < len; ++i) {
-        auto node = testnode::make(i);
+        auto node = container_type::make(i);
         a.push_back(*node);
         owner.push_back(std::move(node));
 
-        node = testnode::make(i);
+        node = container_type::make(i);
         b.push_back(*node);
         owner.push_back(std::move(node));
     }
@@ -609,7 +693,7 @@ TEST_CASE_TEMPLATE("test list join", List, dllist, dllist2) {
     // with the correct concatenation 0...n,0...n
     a.join(b);
 #if 0
-    Dll_foreach(&a, node, struct testnode, link){
+    Dll_foreach(&a, node, struct container_type, link){
         info("val %zu", node->num);
     }
 #endif
@@ -633,11 +717,12 @@ TEST_CASE_TEMPLATE("test list join", List, dllist, dllist2) {
 
 TEST_CASE_TEMPLATE("test list split", List, dllist, dllist2) {
     List a;
-    std::vector<std::unique_ptr<testnode>> owner;
+    using container_type = List::container_type;
+    std::vector<std::unique_ptr<container_type>> owner;
 
     constexpr size_t len = 15;
     for (size_t i = 0; i < len; ++i) {
-        auto node = testnode::make(i);
+        auto node = container_type::make(i);
         a.push_back(*node);
         owner.push_back(std::move(node));
     }
@@ -678,10 +763,11 @@ TEST_CASE_TEMPLATE("perf", List, dllist, dllist2) {
     // size_t num = 87;
 
     List q;
-    std::vector<std::unique_ptr<testnode>> owner;
+    using container_type = List::container_type;
+    std::vector<std::unique_ptr<container_type>> owner;
 
     for (size_t i = 0; i < num; i++) {
-        auto node = testnode::make(i);
+        auto node = container_type::make(i);
         q.push_back(*node);
         owner.push_back(std::move(node));
         q.rotate(1, 100);
@@ -698,6 +784,8 @@ TEST_CASE_TEMPLATE("perf", List, dllist, dllist2) {
 
 TEST_CASE_TEMPLATE("test for-range loop", List, dllist, dllist2) {
     using namespace std::chrono;
+    using container_type = List::container_type;
+
     SUBCASE("empty list") {
         bool found = false;
         List list;
@@ -712,7 +800,7 @@ TEST_CASE_TEMPLATE("test for-range loop", List, dllist, dllist2) {
 
     SUBCASE("one element in list") {
         bool found = false;
-        testnode tmp;
+        container_type tmp;
         tmp.num = std::numeric_limits<std::size_t>::max();
         List list;
         list.push_back(tmp);
@@ -727,14 +815,14 @@ TEST_CASE_TEMPLATE("test for-range loop", List, dllist, dllist2) {
 
     SUBCASE("many elements") {
         bool found = false;
-        std::vector<std::unique_ptr<testnode>> owner;
+        std::vector<std::unique_ptr<container_type>> owner;
         constexpr unsigned N = 120;
         for (unsigned i = 0; i < N; ++i) {
-            auto ptr = std::make_unique<testnode>(i);
+            auto ptr = std::make_unique<container_type>(i);
             owner.push_back(std::move(ptr));
         }
 
-        testnode tmp;
+        container_type tmp;
         tmp.num = std::numeric_limits<std::size_t>::max();
 
         List q;

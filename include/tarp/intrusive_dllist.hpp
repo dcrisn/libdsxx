@@ -112,15 +112,20 @@
 namespace tarp {
 
 // forward declaration
-template<typename Parent, auto Member_ptr = nullptr>
+template<typename Parent, auto Member_ptr_or_hook_tag = 0>
 class dllist;
 
 // intrusive doubly linked list node.
 // Any data structure that wants to be linked into
 // one or more intrusive doubly linked lists must embed
 // one or more nodes of this type.
-struct dlnode {
-    dlnode() = default;
+
+// this is to enable multiple inheritance, thereby making
+// it possible to have multiple 'hooks' when using the
+// inheritance-based approach.
+template<unsigned Tag>
+struct tagged_dlnode {
+    tagged_dlnode() = default;
 
     bool is_linked() const { return prev != this || next != this; }
 
@@ -129,9 +134,30 @@ struct dlnode {
     // in a 1-element list.
     void reset() { next = prev = this; }
 
-    struct dlnode *next = this;
-    struct dlnode *prev = this;
+    struct tagged_dlnode *next = this;
+    struct tagged_dlnode *prev = this;
 };
+
+using dlnode = tagged_dlnode<0>;
+
+namespace impl {
+template<typename Parent, auto HookValue>
+struct node_resolver {
+    // Since the specialization catches integers,
+    // this is always the container_of path.
+    static constexpr bool is_inheritance = false;
+    using type = dlnode;
+};
+
+// 2. Specialization: Strictly for the Tagged Inheritance path
+template<typename Parent, auto Tag>
+    requires std::is_integral_v<decltype(Tag)>
+struct node_resolver<Parent, Tag> {
+    static constexpr bool is_inheritance = true;
+    using type = tagged_dlnode<Tag>;
+};
+
+}  // namespace impl
 
 // Intrusive doubly linked list template class.
 // This is templated in order to avoid having to
@@ -155,16 +181,19 @@ struct dlnode {
 //
 // 2) Using inheritance: in this case, Parent is the user object
 // and must publically inherit from dlnode. MemberPtr in this
-// case must be specified as nullptr as it is unnecessary.
-// This method works safely with any object.
+// case is actually a tag number which is used to make it possible
+// to inherit from multiple instances of dlnode.
 template<typename Parent, auto MemberPtr>
 class dllist final {
+    using resolve = impl::node_resolver<Parent, MemberPtr>;
+
 public:
-    static inline constexpr bool inheritance_hook_v =
-      std::is_base_of_v<dlnode, Parent>;
+    static inline constexpr bool inheritance_hook_v = resolve::is_inheritance;
+    using node_type = resolve::type;
+    using container_type = Parent;
 
 private:
-    static Parent *derive_container(dlnode *node) {
+    static Parent *derive_container(node_type *node) {
         // C++ inheritance based: this supports non-standard
         // layout objects;
         // Get Parent (the container) back from a pointer to node.
@@ -175,36 +204,36 @@ private:
         // explicit container_of-based: this only supports
         // standard-layout objects.
         else {
-            return tarp::container_of<Parent, dlnode, MemberPtr>(node);
+            return tarp::container_of<Parent, node_type, MemberPtr>(node);
         }
     }
 
-    static const Parent *derive_container(dlnode const *node) {
+    static const Parent *derive_container(node_type const *node) {
         if constexpr (inheritance_hook_v) {
             return static_cast<const Parent *>(*node);
         } else {
-            return tarp::container_of<Parent, dlnode, MemberPtr>(node);
+            return tarp::container_of<Parent, node_type, MemberPtr>(node);
         }
     }
 
 public:
     // Forward iterator over dllist.
     struct iterator {
-        dlnode *ptr = nullptr;
+        node_type *ptr = nullptr;
 
-        iterator(dlnode *node) noexcept : ptr(node) {}
+        iterator(node_type *node) noexcept : ptr(node) {}
 
         // Replace the current iterator pointer.
-        void assign(dlnode *node) noexcept { ptr = node; }
+        void assign(node_type *node) noexcept { ptr = node; }
 
         // Replace the current iterator pointer.
         void assign(Parent *obj) noexcept {
             if (obj) {
-                dlnode *node = nullptr;
+                node_type *node = nullptr;
                 if constexpr (inheritance_hook_v) {
                     node = obj;
                 } else {
-                    node = (obj).*MemberPtr;
+                    node = &(obj->*MemberPtr);
                 }
                 ptr = node;
             } else {
@@ -252,15 +281,15 @@ public:
 
     // Reverse iterator over dllist.
     struct reverse_iterator {
-        dlnode *ptr = nullptr;
+        node_type *ptr = nullptr;
 
-        reverse_iterator(dlnode *node) noexcept : ptr(node) {}
+        reverse_iterator(node_type *node) noexcept : ptr(node) {}
 
-        void assign(dlnode *node) noexcept { ptr = node; }
+        void assign(node_type *node) noexcept { ptr = node; }
 
         void assign(Parent *obj) noexcept {
             if (obj) {
-                dlnode *node = nullptr;
+                node_type *node = nullptr;
                 if constexpr (inheritance_hook_v) {
                     node = obj;
                 } else {
@@ -368,7 +397,7 @@ public:
     }
 
     // Copy constructor and copy assigment operator disabled.
-    // We cannot have the same exact dlnode in multiple lists
+    // We cannot have the same exact node_type in multiple lists
     // for obious reasons: its .next and .prev would get mutated
     // in both places.
     dllist(const dllist &) = delete;
@@ -385,16 +414,18 @@ public:
     dllist() = default;
 
     // Given a pointer to a node, get a pointer to its parent container.
-    Parent *get_container(dlnode *node) { return derive_container(node); }
+    Parent *get_container(node_type *node) { return derive_container(node); }
 
     // Given a pointer to a node, get a pointer to its parent container.
-    Parent *get_container(dlnode *node) const { return derive_container(node); }
+    Parent *get_container(node_type *node) const {
+        return derive_container(node);
+    }
 
     // Given a reference to a node, get a reference to its parent container.
-    Parent &container_of(dlnode &node) { return *derive_container(node); }
+    Parent &container_of(node_type &node) { return *derive_container(node); }
 
     // Given a reference to a node, get a reference to its parent container.
-    const Parent &container_of(const dlnode &node) const {
+    const Parent &container_of(const node_type &node) const {
         return *derive_container(node);
     }
 
@@ -425,7 +456,7 @@ public:
     // True if the front of the list has the same address
     // as the given node.
     // This must not be called on an empty list.
-    bool front_equals(const dlnode &node) const {
+    bool front_equals(const node_type &node) const {
         if (m_count == 0) {
             return false;
         }
@@ -445,7 +476,7 @@ public:
     // True if the tail of the list has the same address
     // as the given node.
     // This must not be called on an empty list.
-    bool back_equals(const dlnode &node) const {
+    bool back_equals(const node_type &node) const {
         if (m_count == 0) {
             return false;
         }
@@ -547,43 +578,44 @@ public:
     void swap(dllist &other);
 
 private:
-    void swap(dlnode &a, dlnode &b);
+    void swap(node_type &a, node_type &b);
     void swap_list_heads(dllist &other);
     static std::size_t count_list_nodes(dllist &list);
-    dlnode *find_nth_node(std::size_t n);
+    node_type *find_nth_node(std::size_t n);
 
-    void put_after(dlnode &node_before, dlnode &node);
-    void put_before(dlnode &node_after, dlnode &node);
+    void put_after(node_type &node_before, node_type &node);
+    void put_before(node_type &node_after, node_type &node);
 
-    dlnode *replace_node(dlnode &a, dlnode &b);
-    dllist split(dlnode &node);
+    node_type *replace_node(node_type &a, node_type &b);
+    dllist split(node_type &node);
 
-    void push_front(dlnode &);
-    void push_back(dlnode &);
+    void push_front(node_type &);
+    void push_back(node_type &);
 
-    dlnode *pop_front_node();
-    dlnode *pop_back_node();
+    node_type *pop_front_node();
+    node_type *pop_back_node();
 
-    void rotate_to(dlnode &);
+    void rotate_to(node_type &);
 
-    void unlink(dlnode &);
+    void unlink(node_type &);
 
 private:
     // number of elements in list
     std::size_t m_count = 0;
 
     // list head
-    dlnode *m_front = nullptr;
+    node_type *m_front = nullptr;
 
     // list tail
-    dlnode *m_back = nullptr;
+    node_type *m_back = nullptr;
 };
 
 //
 
 template<typename Parent, auto MemberPtr>
-dlnode *dllist<Parent, MemberPtr>::pop_front_node() {
-    dlnode *node = m_front;
+dllist<Parent, MemberPtr>::node_type *
+dllist<Parent, MemberPtr>::pop_front_node() {
+    node_type *node = m_front;
     switch (m_count) {
     case 0: return nullptr;
     case 1: m_front = m_back = nullptr; break;
@@ -607,8 +639,9 @@ Parent *dllist<Parent, MemberPtr>::pop_front() {
 }
 
 template<typename Parent, auto MemberPtr>
-dlnode *dllist<Parent, MemberPtr>::pop_back_node() {
-    dlnode *node = m_back;
+dllist<Parent, MemberPtr>::node_type *
+dllist<Parent, MemberPtr>::pop_back_node() {
+    node_type *node = m_back;
 
     switch (m_count) {
     case 0: return nullptr;
@@ -633,7 +666,7 @@ Parent *dllist<Parent, MemberPtr>::pop_back() {
 }
 
 template<typename Parent, auto MemberPtr>
-void dllist<Parent, MemberPtr>::push_front(dlnode &node) {
+void dllist<Parent, MemberPtr>::push_front(node_type &node) {
     node.prev = nullptr;
     node.next = m_front;
     m_front = &node;
@@ -645,7 +678,7 @@ void dllist<Parent, MemberPtr>::push_front(dlnode &node) {
 template<typename Parent, auto MemberPtr>
 void dllist<Parent, MemberPtr>::push_front(Parent &obj) {
     if constexpr (inheritance_hook_v) {
-        dlnode &node = obj;
+        node_type &node = obj;
         push_front(node);
     } else {
         auto &node = obj.*MemberPtr;
@@ -654,7 +687,7 @@ void dllist<Parent, MemberPtr>::push_front(Parent &obj) {
 }
 
 template<typename Parent, auto MemberPtr>
-void dllist<Parent, MemberPtr>::push_back(dlnode &node) {
+void dllist<Parent, MemberPtr>::push_back(node_type &node) {
     node.next = nullptr;
     node.prev = m_back;
     m_back = &node;
@@ -666,7 +699,7 @@ void dllist<Parent, MemberPtr>::push_back(dlnode &node) {
 template<typename Parent, auto MemberPtr>
 void dllist<Parent, MemberPtr>::push_back(Parent &obj) {
     if constexpr (inheritance_hook_v) {
-        dlnode &node = obj;
+        node_type &node = obj;
         push_back(node);
     } else {
         auto &node = obj.*MemberPtr;
@@ -692,7 +725,7 @@ void dllist<Parent, MemberPtr>::join(dllist &other) {
 
 template<typename Parent, auto MemberPtr>
 std::size_t dllist<Parent, MemberPtr>::count_list_nodes(dllist &list) {
-    struct dlnode *node = list.m_front;
+    node_type *node = list.m_front;
     std::size_t count = 0;
     while (node) {
         node = node->next;
@@ -702,7 +735,7 @@ std::size_t dllist<Parent, MemberPtr>::count_list_nodes(dllist &list) {
 }
 
 template<typename Parent, auto MemberPtr>
-dllist<Parent, MemberPtr> dllist<Parent, MemberPtr>::split(dlnode &node) {
+dllist<Parent, MemberPtr> dllist<Parent, MemberPtr>::split(node_type &node) {
     std::size_t orig_len = m_count;
     dllist b;
 
@@ -730,7 +763,7 @@ dllist<Parent, MemberPtr> dllist<Parent, MemberPtr>::split(dlnode &node) {
 template<typename Parent, auto MemberPtr>
 dllist<Parent, MemberPtr> dllist<Parent, MemberPtr>::split(Parent &obj) {
     if constexpr (inheritance_hook_v) {
-        dlnode &node = obj;
+        node_type &node = obj;
         return split(node);
     } else {
         auto &node = obj.*MemberPtr;
@@ -765,7 +798,7 @@ void dllist<Parent, MemberPtr>::upend() {
     if (m_count < 2) return;
     if (!m_front) return;
 
-    struct dlnode *a, *b, *c;
+    node_type *a, *b, *c;
     a = b = c = m_front;
     while (a && a->next) {
         b = a->next;
@@ -811,7 +844,7 @@ void dllist<Parent, MemberPtr>::rotate(int dir, std::size_t num_rotations) {
 }
 
 template<typename Parent, auto MemberPtr>
-void dllist<Parent, MemberPtr>::rotate_to(dlnode &node) {
+void dllist<Parent, MemberPtr>::rotate_to(node_type &node) {
     if (&node == m_front) return;
 
     /* link front and back */
@@ -830,7 +863,7 @@ void dllist<Parent, MemberPtr>::rotate_to(dlnode &node) {
 template<typename Parent, auto MemberPtr>
 void dllist<Parent, MemberPtr>::rotate_to(Parent &obj) {
     if constexpr (inheritance_hook_v) {
-        dlnode &node = obj;
+        node_type &node = obj;
         rotate_to(node);
     } else {
         auto &node = obj.*MemberPtr;
@@ -839,13 +872,14 @@ void dllist<Parent, MemberPtr>::rotate_to(Parent &obj) {
 }
 
 template<typename Parent, auto MemberPtr>
-dlnode *dllist<Parent, MemberPtr>::find_nth_node(std::size_t n) {
+dllist<Parent, MemberPtr>::node_type *
+dllist<Parent, MemberPtr>::find_nth_node(std::size_t n) {
 #if 0
     std::cerr << "dllist.find_nth(" << n << "), m_count=" << m_count
               << ", m_front=" << static_cast<void *>(m_front)
               << ", m_back=" << static_cast<void *>(m_back) << std::endl;
 #endif
-    struct dlnode *node = nullptr;
+    node_type *node = nullptr;
     if (n == 0 || n > m_count) {
         return nullptr;
     }
@@ -882,7 +916,7 @@ Parent *dllist<Parent, MemberPtr>::find_nth(std::size_t n) {
 }
 
 template<typename Parent, auto MemberPtr>
-void dllist<Parent, MemberPtr>::unlink(dlnode &node) {
+void dllist<Parent, MemberPtr>::unlink(node_type &node) {
     if (m_count <= 0) {
         return;
     }
@@ -905,7 +939,7 @@ void dllist<Parent, MemberPtr>::unlink(dlnode &node) {
 template<typename Parent, auto MemberPtr>
 void dllist<Parent, MemberPtr>::unlink(Parent &obj) {
     if constexpr (inheritance_hook_v) {
-        dlnode &node = obj;
+        node_type &node = obj;
         unlink(node);
     } else {
         auto &node = obj.*MemberPtr;
@@ -914,7 +948,8 @@ void dllist<Parent, MemberPtr>::unlink(Parent &obj) {
 }
 
 template<typename Parent, auto MemberPtr>
-void dllist<Parent, MemberPtr>::put_after(dlnode &node_before, dlnode &node) {
+void dllist<Parent, MemberPtr>::put_after(node_type &node_before,
+                                          node_type &node) {
     if (&node_before == m_back) {
         push_back(node);
         return;
@@ -930,8 +965,8 @@ void dllist<Parent, MemberPtr>::put_after(dlnode &node_before, dlnode &node) {
 template<typename Parent, auto MemberPtr>
 void dllist<Parent, MemberPtr>::put_after(Parent &obj_before, Parent &obj) {
     if constexpr (inheritance_hook_v) {
-        dlnode &node_before = obj_before;
-        dlnode &node = obj;
+        node_type &node_before = obj_before;
+        node_type &node = obj;
         put_after(node_before, node);
     } else {
         auto &node_before = obj_before.*MemberPtr;
@@ -941,7 +976,8 @@ void dllist<Parent, MemberPtr>::put_after(Parent &obj_before, Parent &obj) {
 }
 
 template<typename Parent, auto MemberPtr>
-void dllist<Parent, MemberPtr>::put_before(dlnode &node_after, dlnode &node) {
+void dllist<Parent, MemberPtr>::put_before(node_type &node_after,
+                                           node_type &node) {
     if (&node_after == m_front) {
         push_front(node);
         return;
@@ -957,8 +993,8 @@ void dllist<Parent, MemberPtr>::put_before(dlnode &node_after, dlnode &node) {
 template<typename Parent, auto MemberPtr>
 void dllist<Parent, MemberPtr>::put_before(Parent &obj_after, Parent &obj) {
     if constexpr (inheritance_hook_v) {
-        dlnode &node_after = obj_after;
-        dlnode &node = obj;
+        node_type &node_after = obj_after;
+        node_type &node = obj;
         put_before(node_after, node);
     } else {
         auto &node_after = obj_after.*MemberPtr;
@@ -968,7 +1004,8 @@ void dllist<Parent, MemberPtr>::put_before(Parent &obj_after, Parent &obj) {
 }
 
 template<typename Parent, auto MemberPtr>
-dlnode *dllist<Parent, MemberPtr>::replace_node(dlnode &a, dlnode &b) {
+dllist<Parent, MemberPtr>::node_type *
+dllist<Parent, MemberPtr>::replace_node(node_type &a, node_type &b) {
     b.next = a.next;
     b.prev = a.prev;
 
@@ -985,8 +1022,8 @@ dlnode *dllist<Parent, MemberPtr>::replace_node(dlnode &a, dlnode &b) {
 template<typename Parent, auto MemberPtr>
 Parent *dllist<Parent, MemberPtr>::replace(Parent &a, Parent &b) {
     if constexpr (inheritance_hook_v) {
-        dlnode &node_a = a;
-        dlnode &node_b = b;
+        node_type &node_a = a;
+        node_type &node_b = b;
         replace_node(node_a, node_b);
         return &b;
     } else {
@@ -998,12 +1035,12 @@ Parent *dllist<Parent, MemberPtr>::replace(Parent &a, Parent &b) {
 }
 
 template<typename Parent, auto MemberPtr>
-void dllist<Parent, MemberPtr>::swap(dlnode &a, dlnode &b) {
+void dllist<Parent, MemberPtr>::swap(node_type &a, node_type &b) {
     if (&a == &b) {
         return;
     }
 
-    struct dlnode *before_a = a.prev;
+    node_type *before_a = a.prev;
     unlink(a);
     replace(b, a);
 
