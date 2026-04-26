@@ -106,7 +106,9 @@
  *************************************************************************/
 
 #include "intrusive.hpp"
+#include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 
 namespace tarp {
@@ -219,14 +221,22 @@ private:
     }
 
 public:
-    // Forward iterator over dllist.
+    // Bidirectional iterator over dllist.
     struct iterator {
         node_type *ptr = nullptr;
 
+        // used when iterating backward
+        dlnode *prev = nullptr;
+
         iterator(node_type *node) noexcept : ptr(node) {}
 
+        iterator() = default;
+
         // Replace the current iterator pointer.
-        void assign(node_type *node) noexcept { ptr = node; }
+        void assign(node_type *node) noexcept {
+            ptr = node;
+            prev = ptr ? ptr->prev : nullptr;
+        }
 
         // Replace the current iterator pointer.
         void assign(Parent *obj) noexcept {
@@ -238,8 +248,10 @@ public:
                     node = &(obj->*MemberPtr);
                 }
                 ptr = node;
+                prev = ptr ? ptr->prev : nullptr;
             } else {
                 ptr = nullptr;
+                prev=nullptr;
             }
         }
 
@@ -259,10 +271,17 @@ public:
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnull-dereference"
 #endif
+            prev = ptr;
             ptr = ptr->next;
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
+            return *this;
+        }
+
+        iterator &operator--() noexcept {
+            ptr = prev;
+            prev = ptr ? ptr->prev : nullptr;
             return *this;
         }
 
@@ -271,85 +290,36 @@ public:
         }
 
         iterator erase(dllist &list) noexcept {
-            if (ptr == nullptr) {
-                return *this;
-            }
             const auto curr = ptr;
             ptr = ptr->next;
             list.unlink(*curr);
+            prev = ptr ? ptr->prev : list.m_back;
             return *this;
+        }
+
+        std::string str() const {
+            std::string s;
+            s +=
+              "{.prev=" +
+              std::to_string(reinterpret_cast<std::uintptr_t>(prev)) +
+              " .ptr=" + std::to_string(reinterpret_cast<std::uint64_t>(ptr)) +
+              "}";
+            return s;
         }
     };
 
-    // Reverse iterator over dllist.
-    struct reverse_iterator {
-        node_type *ptr = nullptr;
+    iterator begin() const noexcept {
+        iterator it;
+        it.ptr = m_front;
+        return it;
+    }
 
-        reverse_iterator(node_type *node) noexcept : ptr(node) {}
+    iterator end() const noexcept {
+        iterator it;
+        it.prev = m_back;
+        return it;
+    }
 
-        void assign(node_type *node) noexcept { ptr = node; }
-
-        void assign(Parent *obj) noexcept {
-            if (obj) {
-                node_type *node = nullptr;
-                if constexpr (inheritance_hook_v) {
-                    node = obj;
-                } else {
-                    node = (*obj).*MemberPtr;
-                }
-                ptr = node;
-            } else {
-                ptr = nullptr;
-            }
-        }
-
-        Parent &operator*() const noexcept { return *derive_container(ptr); }
-
-        Parent &operator*() noexcept { return *derive_container(ptr); }
-
-        Parent *operator->() const noexcept { return derive_container(ptr); }
-
-        Parent *operator->() noexcept { return derive_container(ptr); }
-
-        iterator &operator++() noexcept {
-            // it is the caller's responsibility not to increment
-            // an end iterator. Checking here would be safer but slower
-            // in tight loops.
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wnull-dereference"
-#endif
-            ptr = ptr->prev;
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
-            return *this;
-        }
-
-        bool operator!=(const iterator &other) const noexcept {
-            return ptr != other.ptr;
-        }
-
-        iterator erase(dllist &list) noexcept {
-            if (ptr == nullptr) {
-                return *this;
-            }
-            const auto curr = ptr;
-            ptr = ptr->next;
-            list.unlink(*curr);
-            return *this;
-        }
-    };
-
-    iterator begin() const noexcept { return {m_front}; }
-
-    iterator end() const noexcept { return {nullptr}; }
-
-    reverse_iterator rbegin() const noexcept { return {m_back}; }
-
-    reverse_iterator rend() const noexcept { return {nullptr}; }
-
-    // Unlink the element associated to by the given iterator.
     // If it is the end iterator (nullptr), nothing is done.
     // Return an iterator to the element following the erased one.
     iterator erase(iterator it) noexcept {
@@ -360,21 +330,7 @@ public:
         const auto next = it.ptr->next;
         unlink(*it.ptr);
         it.ptr = next;
-        return it;
-    }
-
-    // Unlink the element associated to by the given iterator.
-    // If it is the end iterator (nullptr), nothing is done.
-    // Return an iterator to the next element, i.e. the element
-    // preceding the erased one, since this is a reverse iterator.
-    reverse_iterator erase(reverse_iterator it) noexcept {
-        if (!it.ptr) {
-            return rend();
-        }
-
-        const auto prev = it.ptr->prev;
-        unlink(*it.ptr);
-        it.ptr = prev;
+        it.prev = it.ptr ? it.ptr->prev : m_back;
         return it;
     }
 
@@ -390,7 +346,10 @@ public:
         }
     }
 
-    // Invoke f for each element in the list.
+    // Invoke f for each element in the list;
+    // the elements must not be erased or moved
+    // and the list structure should not be mutated (insertions, erasures)
+    // inside the callback.
     template<typename F>
     void for_each(F &&f) {
         for (auto &cont : *this) {
@@ -445,7 +404,7 @@ public:
 
     // Get reference to the first element in the list.
     // This must not be called on an empty list.
-    auto &front() const {return *derive_container(m_front); }
+    auto &front() const { return *derive_container(m_front); }
 
     // Get reference to the last element in the list.
     // This must not be called on an empty list.

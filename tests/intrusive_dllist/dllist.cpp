@@ -1,5 +1,7 @@
+#include <csignal>
 #include <tarp/intrusive.hpp>
 #include <tarp/intrusive_dllist.hpp>
+#include <unistd.h>
 
 #define DOCTEST_CONFIG_IMPLEMENT
 #include <doctest/doctest.h>
@@ -50,6 +52,7 @@ using dllist = tarp::dllist<testnode, &testnode::link>;
 // intrusive dllist using inheritance
 using dllist2 = tarp::dllist<testnode2, 0u>;
 
+#if 1
 TEST_CASE_TEMPLATE("linked() getter tests", List, dllist, dllist2) {
     List list;
     using container_type = List::container_type;
@@ -601,7 +604,7 @@ TEST_CASE_TEMPLATE("test for each forward iteration", List, dllist, dllist2) {
     }
 }
 
-// test that 2 lists can swap he
+// test that 2 lists can swap heads
 TEST_CASE_TEMPLATE("test swap heads", List, dllist, dllist2) {
     List a, b;
     using container_type = List::container_type;
@@ -731,7 +734,9 @@ TEST_CASE_TEMPLATE("test list split", List, dllist, dllist2) {
     // list breaking off from a; a should be left with len/2 items; the new
     // list should have len/2 items as well (or (len/2)+1, if the len is odd);
     // e.g. if len=15, len(a) should be 7 and len(b) should be 8
-    List b = a.split(*a.find_nth((len / 2) + 1));
+    auto *node =a.find_nth((len / 2) + 1);
+    REQUIRE(node);
+    List b = a.split(*node);
 
     // round the length up for b since the lenth was divided in half and it
     // could've been truncated if len is odd;
@@ -781,7 +786,18 @@ TEST_CASE_TEMPLATE("perf", List, dllist, dllist2) {
 
     q.clear();
 }
+#endif
 
+// Note this does not support erasure since it does not expose
+// an iterator on which we can call .erase();
+// and calling .unlink() on the current element will cause a
+// crash, since it would compromise the unrelying iterator;
+// similarly, it's obviously illegal to change the underlying
+// node pointers while iterating e.g.
+// for (auto x : mylist) x.node.next.next.prev=nullptr;
+//
+// if erasure while iterating is needed, explicit .begin(), .end()
+// iteration must be used.
 TEST_CASE_TEMPLATE("test for-range loop", List, dllist, dllist2) {
     using namespace std::chrono;
     using container_type = List::container_type;
@@ -838,6 +854,258 @@ TEST_CASE_TEMPLATE("test for-range loop", List, dllist, dllist2) {
             }
         }
         REQUIRE(found == true);
+    }
+}
+
+TEST_CASE_TEMPLATE("test backward iteration with bidir iterator",
+                   List,
+                   dllist,
+                   dllist2) {
+    using namespace std::chrono;
+    using container_type = List::container_type;
+
+    SUBCASE("empty list") {
+        List list;
+        unsigned iterated = 0;
+
+        auto it = list.end();
+        while (it != list.begin()) {
+            --it;
+            ++iterated;
+        }
+        REQUIRE(iterated == 0);
+    }
+
+    SUBCASE("one element in list") {
+        bool found = false;
+        container_type tmp;
+        tmp.num = std::numeric_limits<std::size_t>::max();
+        List list;
+        list.push_back(tmp);
+
+        auto it = list.end();
+        while (it != list.begin()) {
+            --it;
+            auto &i = *it;
+            if (i.num >= std::numeric_limits<std::size_t>::max()) {
+                found = true;
+                break;
+            }
+        }
+        REQUIRE(found);
+    }
+
+    SUBCASE("many elements") {
+        bool found = false;
+        std::vector<std::unique_ptr<container_type>> owner;
+        constexpr unsigned N = 120;
+        for (unsigned i = 0; i < N; ++i) {
+            auto ptr = std::make_unique<container_type>(i);
+            owner.push_back(std::move(ptr));
+        }
+
+        container_type tmp;
+        tmp.num = std::numeric_limits<std::size_t>::max();
+
+        List q;
+        q.push_back(tmp);
+        for (auto &i : owner) {
+            q.push_back(*i);
+        }
+
+        auto it = q.end();
+        while (it != q.begin()) {
+            --it;
+            auto &i = *it;
+            if (i.num >= std::numeric_limits<std::size_t>::max()) {
+                found = true;
+                break;
+            }
+        }
+        REQUIRE(found == true);
+    }
+}
+
+TEST_CASE_TEMPLATE("erasure while iterating", List, dllist, dllist2) {
+    using container_type = List::container_type;
+    SUBCASE("forward iteration") {
+        SUBCASE("1 element") {
+            unsigned erased = 0;
+            container_type tmp;
+            tmp.num = std::numeric_limits<std::size_t>::max();
+            List list;
+            list.push_back(tmp);
+
+            for (auto it = list.begin(); it != list.end();) {
+                auto &i = *it;
+                if (i.num >= std::numeric_limits<std::size_t>::max()) {
+                    erased++;
+                    it = list.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            REQUIRE(erased == 1);
+            REQUIRE(list.size() == 0);
+            REQUIRE(list.begin().ptr == list.end().ptr);
+            REQUIRE(list.begin().ptr == nullptr);
+        }
+        SUBCASE("2 elements") {
+            unsigned erased = 0;
+            container_type a, b;
+            a.num = 1;
+            b.num = 2;
+            List list;
+            list.push_back(a);
+            list.push_back(b);
+
+            for (auto it = list.begin(); it != list.end();) {
+                auto &i = *it;
+                if (i.num != 0) {
+                    erased++;
+                    it = list.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            REQUIRE(erased == 2);
+            REQUIRE(list.size() == 0);
+            REQUIRE(list.begin().ptr == list.end().ptr);
+            REQUIRE(list.begin().ptr == nullptr);
+        }
+        SUBCASE("many elements") {
+            unsigned erased = 0;
+            std::vector<std::unique_ptr<container_type>> owner;
+            constexpr unsigned N = 100;
+            for (unsigned i = 0; i < N; ++i) {
+                auto ptr = std::make_unique<container_type>(i);
+                ptr->num = i;
+                owner.push_back(std::move(ptr));
+            }
+
+            List q;
+            for (auto &i : owner) {
+                q.push_back(*i);
+            }
+
+            SUBCASE("erase all") {
+                for (auto it = q.begin(); it != q.end();) {
+                    auto &i = *it;
+                    if (i.num <= N) {
+                        erased++;
+                        it = q.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
+                REQUIRE(erased == N);
+            }
+            SUBCASE("erase some") {
+                for (auto it = q.begin(); it != q.end();) {
+                    auto &i = *it;
+                    if (i.num % 2) {
+                        erased++;
+                        it = q.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
+                REQUIRE(erased == (N / 2));
+            }
+        }
+    }
+    SUBCASE("backward iteration") {
+        SUBCASE("1 element") {
+            unsigned erased = 0;
+            container_type tmp;
+            tmp.num = std::numeric_limits<std::size_t>::max();
+            List list;
+            list.push_back(tmp);
+
+            auto it = list.end();
+            while (it != list.begin()) {
+                --it;
+                auto &i = *it;
+                if (i.num >= std::numeric_limits<std::size_t>::max()) {
+                    erased++;
+                    it = list.erase(it);
+                }
+            }
+            REQUIRE(erased == 1);
+            REQUIRE(list.size() == 0);
+            REQUIRE(list.begin().ptr == list.end().ptr);
+            REQUIRE(list.begin().ptr == nullptr);
+        }
+        SUBCASE("2 elements") {
+            unsigned erased = 0;
+            container_type a, b;
+            a.num = 1;
+            b.num = 2;
+            List list;
+            list.push_back(a);
+            list.push_back(b);
+
+            auto it = list.end();
+            while (it != list.begin()) {
+                --it;
+                auto &i = *it;
+                if (i.num != 0) {
+                    erased++;
+                    it = list.erase(it);
+                }
+            }
+            REQUIRE(erased == 2);
+            REQUIRE(list.size() == 0);
+            REQUIRE(list.begin().ptr == list.end().ptr);
+            REQUIRE(list.begin().ptr == nullptr);
+        }
+        SUBCASE("many elements") {
+            unsigned erased = 0;
+            std::vector<std::unique_ptr<container_type>> owner;
+            constexpr unsigned N = 100;
+            for (unsigned i = 0; i < N; ++i) {
+                auto ptr = std::make_unique<container_type>(i);
+                ptr->num = i;
+                owner.push_back(std::move(ptr));
+            }
+
+            List q;
+            for (auto &i : owner) {
+                q.push_back(*i);
+            }
+
+            SUBCASE("erase all") {
+                auto it = q.end();
+                while (it != q.begin()) {
+                    --it;
+                    auto &i = *it;
+                    if (i.num <= N) {
+                        erased++;
+                        it = q.erase(it);
+                    }
+                }
+                REQUIRE(erased == N);
+            }
+            SUBCASE("erase some") {
+                auto it = q.end();
+                std::cerr << "it initialized to " << it.str() << std::endl;
+                while (it != q.begin()) {
+                    --it;
+                    std::cerr << "it decremented. now: " << it.str()
+                              << std::endl;
+                    auto &i = *it;
+                    std::cerr << "Looking at number: " << i.num
+                              << " | it: " << it.str() << std::endl;
+                    if (i.num % 2) {
+                        erased++;
+                        it = q.erase(it);
+                        std::cerr << "it after q.erase: " << it.str()
+                                  << std::endl;
+                    }
+                }
+                REQUIRE(erased == (N / 2));
+            }
+        }
     }
 }
 
