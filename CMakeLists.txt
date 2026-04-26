@@ -30,7 +30,6 @@ add_compile_options(
     -fdiagnostics-color=always
     -Wno-format-truncation
     -Wold-style-cast
-    -O3
 )
 
 add_definitions(
@@ -40,6 +39,43 @@ add_definitions(
 option(DEBUG "Build debug binaries" OFF)
 option(USE_SANITIZERS "Use program sanitizers" OFF)
 option(BUILD_TESTS "Generate test targets" OFF)
+
+if (DEBUG)
+    message("This is a *DEBUG* build")
+    add_compile_options(-ggdb3)
+    add_definitions(-DDEBUG_BUILD)
+else()
+    message("This is a *PRODUCTION* build")
+    add_compile_options(-O3)
+    #add_compile_options(-Werror)
+    #add_definitions(-DNDEBUG)  # strip out asserts
+endif()
+
+if (USE_SANITIZERS)
+    message("Trying to build with sanitizer support")
+    foreach(flag
+            -fsanitize=address;
+            -fsanitize=leak;
+            -fsanitize=undefined; # includes null, alignment, bounds-strict etc
+            -fsanitize=pointer-compare;
+            -fsanitize=pointer-subtract;
+            #-fsanitize=thread
+            )
+        message("sanitizer flag: ${flag}")
+
+        # TODO: find way to check if san libs exist / compiler supports the flags
+        SET(has_flag 1)
+
+        if (has_flag)
+            add_compile_options(${flag})
+            add_link_options(${flag})
+        else()
+            message(NOTICE "Failed to add sanitizer flag '${flag}' (unacceptable)")
+        endif()
+
+    endforeach()
+endif()
+
 
 ##################################
 #        dependencies
