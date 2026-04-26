@@ -81,6 +81,7 @@
  * foreach                  O(n)                                           |
  * put_after                O(1)                                           |
  * put_before               O(1)                                           |
+ * insert(iterator)         O(1)                                           |
  * replace                  O(1)                                           |
  * swap (list)              O(1)                                           |
  * swap (node)              O(1)                                           |
@@ -226,7 +227,7 @@ public:
         node_type *ptr = nullptr;
 
         // used when iterating backward
-        dlnode *prev = nullptr;
+        dlnode *prevptr = nullptr;
 
         iterator(node_type *node) noexcept : ptr(node) {}
 
@@ -235,7 +236,7 @@ public:
         // Replace the current iterator pointer.
         void assign(node_type *node) noexcept {
             ptr = node;
-            prev = ptr ? ptr->prev : nullptr;
+            prevptr = ptr ? ptr->prev : nullptr;
         }
 
         // Replace the current iterator pointer.
@@ -248,10 +249,10 @@ public:
                     node = &(obj->*MemberPtr);
                 }
                 ptr = node;
-                prev = ptr ? ptr->prev : nullptr;
+                prevptr = ptr ? ptr->prev : nullptr;
             } else {
                 ptr = nullptr;
-                prev=nullptr;
+                prevptr = nullptr;
             }
         }
 
@@ -263,6 +264,14 @@ public:
 
         Parent *operator->() noexcept { return derive_container(ptr); }
 
+        Parent *prev() const noexcept { return derive_container(prevptr); }
+
+        Parent *prev() noexcept { return derive_container(prevptr); }
+
+        Parent *next() const noexcept { return derive_container(ptr->next); }
+
+        Parent *next() noexcept { return derive_container(ptr->next); }
+
         iterator &operator++() noexcept {
             // it is the caller's responsibility not to increment
             // an end iterator. Checking here would be safer but slower
@@ -271,7 +280,7 @@ public:
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnull-dereference"
 #endif
-            prev = ptr;
+            prevptr = ptr;
             ptr = ptr->next;
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
@@ -280,20 +289,28 @@ public:
         }
 
         iterator &operator--() noexcept {
-            ptr = prev;
-            prev = ptr ? ptr->prev : nullptr;
+            ptr = prevptr;
+            prevptr = ptr ? ptr->prev : nullptr;
             return *this;
         }
 
-        bool operator!=(const iterator &other) const noexcept {
-            return ptr != other.ptr;
+        bool operator==(const iterator &rhs) const {
+            return rhs.ptr == ptr && rhs.prevptr == prevptr;
         }
+
+        bool operator!=(const iterator &rhs) const { return !operator==(rhs); }
 
         iterator erase(dllist &list) noexcept {
             const auto curr = ptr;
             ptr = ptr->next;
             list.unlink(*curr);
-            prev = ptr ? ptr->prev : list.m_back;
+
+            // if erased the last element, then ptr
+            // will be null, in which case we take list.m_back,
+            // to effectively make the iterator the _end_ iterator,
+            // so it can be decremented as usual.
+            prevptr = ptr ? ptr->prev : list.m_back;
+
             return *this;
         }
 
@@ -301,7 +318,7 @@ public:
             std::string s;
             s +=
               "{.prev=" +
-              std::to_string(reinterpret_cast<std::uintptr_t>(prev)) +
+              std::to_string(reinterpret_cast<std::uintptr_t>(prevptr)) +
               " .ptr=" + std::to_string(reinterpret_cast<std::uint64_t>(ptr)) +
               "}";
             return s;
@@ -316,7 +333,7 @@ public:
 
     iterator end() const noexcept {
         iterator it;
-        it.prev = m_back;
+        it.prevptr = m_back;
         return it;
     }
 
@@ -330,7 +347,7 @@ public:
         const auto next = it.ptr->next;
         unlink(*it.ptr);
         it.ptr = next;
-        it.prev = it.ptr ? it.ptr->prev : m_back;
+        it.prevptr = it.ptr ? it.ptr->prev : m_back;
         return it;
     }
 
@@ -522,6 +539,11 @@ public:
     // Given a reference to a node not currently in the list,
     // insert it into the list before node_after.
     void put_before(Parent &node_after, Parent &node);
+
+    // Given a _valid_ iterator, insert node before it,
+    // and return an iterator to the inserted element
+    // (previous iterator is invalidated).
+    iterator insert(iterator it, Parent &node);
 
     // Given a reference to a node that exists in the list (a)
     // and a node that does not exist in the list (b),
@@ -962,6 +984,24 @@ void dllist<Parent, MemberPtr>::put_before(Parent &obj_after, Parent &obj) {
         auto &node = obj.*MemberPtr;
         put_before(node_after, node);
     }
+}
+
+template<typename Parent, auto MemberPtr>
+dllist<Parent, MemberPtr>::iterator
+dllist<Parent, MemberPtr>::insert(iterator it, Parent &obj) {
+    if (it == begin()) {
+        push_front(obj);
+        return begin();
+    }
+
+    if (it == end()) {
+        push_back(obj);
+        return --end();
+    }
+
+    // we assume here the iterator is indeed _valid_.
+    put_before(*it, obj);
+    return --it;
 }
 
 template<typename Parent, auto MemberPtr>

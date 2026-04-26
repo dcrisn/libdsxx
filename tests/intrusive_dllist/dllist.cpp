@@ -734,7 +734,7 @@ TEST_CASE_TEMPLATE("test list split", List, dllist, dllist2) {
     // list breaking off from a; a should be left with len/2 items; the new
     // list should have len/2 items as well (or (len/2)+1, if the len is odd);
     // e.g. if len=15, len(a) should be 7 and len(b) should be 8
-    auto *node =a.find_nth((len / 2) + 1);
+    auto *node = a.find_nth((len / 2) + 1);
     REQUIRE(node);
     List b = a.split(*node);
 
@@ -786,7 +786,6 @@ TEST_CASE_TEMPLATE("perf", List, dllist, dllist2) {
 
     q.clear();
 }
-#endif
 
 // Note this does not support erasure since it does not expose
 // an iterator on which we can call .erase();
@@ -1105,6 +1104,140 @@ TEST_CASE_TEMPLATE("erasure while iterating", List, dllist, dllist2) {
                 }
                 REQUIRE(erased == (N / 2));
             }
+        }
+    }
+}
+#endif
+
+TEST_CASE_TEMPLATE("put_before with iterator", List, dllist, dllist2) {
+    using container_type = List::container_type;
+    SUBCASE("insert into empty list") {
+        container_type a;
+        a.num = 0xff;
+        List list;
+
+        SUBCASE("end iterator") {
+            auto it = list.end();
+            auto it2 = list.insert(it, a);
+            REQUIRE(it2 != list.end());
+            REQUIRE(list.size() == 1);
+            REQUIRE(it2->num == 0xff);
+            REQUIRE(it2.ptr != nullptr);
+            REQUIRE(it2.prevptr == nullptr);
+        }
+        SUBCASE("begin iterator") {
+            auto it = list.begin();
+            auto it2 = list.insert(it, a);
+            REQUIRE(it2 != list.end());
+            REQUIRE(list.size() == 1);
+            REQUIRE(it2->num == 0xff);
+            REQUIRE(it2.ptr != nullptr);
+            REQUIRE(it2.prevptr == nullptr);
+        }
+    }
+
+    SUBCASE("insert into list with 1 element") {
+        container_type a, b;
+        a.num = 1;
+        b.num = 2;
+        List list;
+        list.push_front(a);
+
+        SUBCASE("end iterator") {
+            auto it = list.end();
+            auto it2 = list.insert(it, b);
+            // inserted b
+            REQUIRE(it2 != list.end());
+            REQUIRE(list.size() == 2);
+            REQUIRE(it2->num == 2);
+            REQUIRE(it2.ptr != nullptr);
+            REQUIRE(it2.prevptr != nullptr);
+            REQUIRE(it2.prev() == &a);
+            REQUIRE(&list.front() == &a);
+
+            // check we can decrement to a
+            --it2;
+            REQUIRE(it2 != list.end());
+            REQUIRE(it2 == list.begin());
+            REQUIRE(it2->num == 1);
+        }
+
+        SUBCASE("begin iterator") {
+            auto it = list.begin();
+            auto it2 = list.insert(it, b);
+            // inserted b
+            REQUIRE(it2 != list.end());
+            REQUIRE(it2 == list.begin());
+            REQUIRE(list.size() == 2);
+            REQUIRE(it2->num == 2);
+            REQUIRE(it2.ptr != nullptr);
+            REQUIRE(it2.prevptr == nullptr);
+            REQUIRE(it2.next() == &a);
+            REQUIRE(&list.back() == &a);
+            REQUIRE(&list.front() == &b);
+
+            // check we can increment to a
+            ++it2;
+            REQUIRE(it2 != list.end());
+            REQUIRE(it2 != list.begin());
+            REQUIRE(it2->num == 1);
+
+            ++it2;
+            REQUIRE(it2 == list.end());
+        }
+    }
+
+    SUBCASE("insert into list with multiple elements") {
+        container_type a, b, c, d, e, f;
+        a.num = 1;
+        b.num = 2;
+        c.num = 3;
+        d.num = 4;
+        e.num = 5;
+        f.num = 8;
+        List list;
+        list.push_back(a);
+        list.push_back(b);
+        list.push_back(c);
+        list.push_back(d);
+        list.push_back(e);
+        list.push_back(f);
+        REQUIRE(list.size() == 6);
+    
+        container_type w,x,y,z;
+        // insert this at the start
+        w.num = 0;
+        // insert these into the gap in the middle
+        x.num = 6;
+        y.num = 7;
+        // insert this at the end
+        z.num = 9;
+
+        bool w_inserted = false;
+        bool x_inserted = false;
+        bool y_inserted = false;
+
+        for (auto it = list.begin(); it != list.end();){
+            if (it->num == 1 && !w_inserted){
+                w_inserted = true;
+                it = list.insert(it, w);
+            } else if (it->num == 8 && !x_inserted){
+                x_inserted = true;
+                it = list.insert(it, x);
+            } else if (it->num == 8 && !y_inserted){
+                y_inserted = true;
+                it = list.insert(it, y);
+            }
+            ++it;
+        }
+
+        list.insert(list.end(), z);
+        REQUIRE(list.size() == 10);
+        unsigned val = 0;
+
+        // we sould have values [0..9]
+        for (auto i : list){
+            REQUIRE(i.num == val++);
         }
     }
 }
