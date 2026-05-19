@@ -13,9 +13,7 @@ namespace tarp {
 template<typename Key, typename T>
 class lru_cache {
 private:
-    struct lru_node {
-        tarp::dlnode link;
-
+    struct lru_node : public tagged_dlnode<0>{
         // map lookup key
         Key k {};
 
@@ -23,7 +21,7 @@ private:
         T v {};
     };
 
-    using lru_list_t = tarp::dllist<lru_node, &lru_node::link>;
+    using lru_list_t = tarp::dllist<lru_node, 0>;
 
 public:
     lru_cache(std::size_t max_size) : m_max_size(max_size) {}
@@ -139,14 +137,12 @@ private:
 template<typename Key>
 class lru_cache<Key, void> {
 private:
-    struct lru_node {
-        tarp::dlnode link;
-
+    struct lru_node : public tagged_dlnode<0>{
         // map lookup key
         Key k {};
     };
 
-    using lru_list_t = tarp::dllist<lru_node, &lru_node::link>;
+    using lru_list_t = tarp::dllist<lru_node, 0>;
 
 public:
     lru_cache(std::size_t max_size) : m_max_size(max_size) {}
