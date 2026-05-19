@@ -45,6 +45,7 @@ install(FILES
 	${public_headers}/tarp/intrusive.hpp
 	${public_headers}/tarp/intrusive_dllist.hpp
 	${public_headers}/tarp/lru_cache.hpp
+	${public_headers}/tarp/disjoint_range_tree.hpp
 	DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tarp/
 	)
 
