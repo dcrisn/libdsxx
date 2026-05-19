@@ -91,6 +91,94 @@ TEST_CASE("tarp::lru_cache basic behavior") {
         CHECK_FALSE(c.contains(3));
     }
 
+    SUBCASE("eviction one by one in LRU order") {
+        lru_cache<int, std::string> c(5);
+        c.put(1, "one");
+        c.put(2, "two");
+        c.put(3, "three");
+        c.put(4, "four");
+        c.put(5, "five");
+        REQUIRE(c.size() == 5);
+        REQUIRE(c.peek_lru() != nullptr);
+        REQUIRE(*c.peek_lru() == "one");
+
+        c.touch(4);
+        c.touch(1);
+        REQUIRE(c.size() == 5);
+        REQUIRE(c.peek_lru() != nullptr);
+        REQUIRE(*c.peek_lru() == "two");
+
+        // all in to start with
+        REQUIRE(c.peek(1) != nullptr);
+        REQUIRE(c.peek(2) != nullptr);
+        REQUIRE(c.peek(3) != nullptr);
+        REQUIRE(c.peek(4) != nullptr);
+        REQUIRE(c.peek(5) != nullptr);
+
+        // evict "two"
+        REQUIRE(c.size() == 5);
+        c.evict_one();
+        REQUIRE(c.size() == 4);
+        // evicted
+        REQUIRE(c.peek(2) == nullptr);
+
+        REQUIRE(c.peek(1) != nullptr);
+        REQUIRE(*c.peek(1) == "one");
+        REQUIRE(c.peek(3) != nullptr);
+        REQUIRE(*c.peek(3) == "three");
+        REQUIRE(c.peek(4) != nullptr);
+        REQUIRE(*c.peek(4) == "four");
+        REQUIRE(c.peek(5) != nullptr);
+        REQUIRE(*c.peek(5) == "five");
+
+        // evict "three"
+        REQUIRE(c.size() == 4);
+        c.evict_one();
+        REQUIRE(c.size() == 3);
+        // evicted
+        REQUIRE(c.peek(3) == nullptr);
+
+        REQUIRE(c.peek(1) != nullptr);
+        REQUIRE(*c.peek(1) == "one");
+        REQUIRE(c.peek(4) != nullptr);
+        REQUIRE(*c.peek(4) == "four");
+        REQUIRE(c.peek(5) != nullptr);
+        REQUIRE(*c.peek(5) == "five");
+
+        // evict "five"
+        REQUIRE(c.size() == 3);
+        c.evict_one();
+        REQUIRE(c.size() == 2);
+        // evicted
+        REQUIRE(c.peek(5) == nullptr);
+
+        REQUIRE(c.peek(1) != nullptr);
+        REQUIRE(*c.peek(1) == "one");
+        REQUIRE(c.peek(4) != nullptr);
+        REQUIRE(*c.peek(4) == "four");
+
+        // evict "four"
+        REQUIRE(c.size() == 2);
+        c.evict_one();
+        REQUIRE(c.size() == 1);
+        // evicted
+        REQUIRE(c.peek(4) == nullptr);
+
+        REQUIRE(c.peek(1) != nullptr);
+        REQUIRE(*c.peek(1) == "one");
+
+        // evict "one"
+        REQUIRE(c.size() == 1);
+        c.evict_one();
+        REQUIRE(c.size() == 0);
+        // evicted
+        REQUIRE(c.peek(1) == nullptr);
+        REQUIRE(c.peek(2) == nullptr);
+        REQUIRE(c.peek(3) == nullptr);
+        REQUIRE(c.peek(4) == nullptr);
+        REQUIRE(c.peek(5) == nullptr);
+    }
+
     SUBCASE("supports move-only types (e.g., unique_ptr)") {
         lru_cache<int, std::unique_ptr<int>> c(2);
         c.put(1, std::make_unique<int>(11));
