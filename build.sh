@@ -7,7 +7,7 @@ configure_build_normal(){
 cmake \
     -B build \
     -G Ninja \
-    -DDEBUG=1 \
+    -DDEBUG=0 \
     -DCMAKE_INSTALL_PREFIX=$HOME/.local/usr \
     -DCMAKE_INSTALL_SYSCONFDIR=$HOME/.local/etc \
     -DBUILD_TESTS=1 \
