@@ -4,12 +4,82 @@
 // O(1) erasure and insertion at both ends.
 // Insertion and erasure anywhere else is not allowed.
 // This implementation is different from std::deque
-// and avoids its performance overheads by using
-// contiguous memory similar to std::vector. IOW,
-// this class does not make the comprimises that
-// std::deque makes and instead focuses solely on
-// fast operations at the two ends of the queue
-// and fast sequential traversal and lookups.
+// and tries to avoid its performance overheads by using
+// contiguous memory similar to std::vector.
+// --------
+// Tests show that for non-trivial types std::deque
+// pulls ahead as the size of the queue grows
+// (e.g. 100k elements) of this implementation for
+// purely push-back-pop-front FIFO-type work flows;
+// it appears the segmented data layout starts
+// being more efficient than the contiguous layout,
+// which is exactly the case it is optimized for.
+// However, for random and sequential lookup and
+// iteration, if ever needed, deque will perform
+// worse. Hence this implementation may be a better
+// choice when iteration is needed or for small
+// trivial/POD types; for very large queues and/with
+// bulky elements in a strict FIFO use pattern, it does
+// not beat std::deque, which manages to keep both
+// ends of the queue hot in the cache.
+// ===================================================
+// EXAMPLE benchmark figures:
+//[FIFO Stress] Chaotic Push Back / Pop Front - Type: std::uint32_t (Trivial)
+// with 100 pushes
+//  Custom Deque      : 0.0016 ms
+//  std::deque        : 0.0017 ms
+//
+//[FIFO Stress] Chaotic Push Back / Pop Front - Type: non_copyable (Non-Trivial)
+// with 100 pushes
+//  Custom Deque      : 0.0021 ms
+//  std::deque        : 0.0024 ms
+//
+//[FIFO Stress] Chaotic Push Back / Pop Front - Type: std::uint32_t (Trivial)
+// with 200 pushes
+//  Custom Deque      : 0.0027 ms
+//  std::deque        : 0.0029 ms
+//
+//[FIFO Stress] Chaotic Push Back / Pop Front - Type: non_copyable (Non-Trivial)
+// with 200 pushes
+//  Custom Deque      : 0.0032 ms
+//  std::deque        : 0.0035 ms
+//
+// ---------
+//
+//[FIFO Stress] Chaotic Push Back / Pop Front - Type: std::uint32_t (Trivial)
+// with 1000 pushes
+//  Custom Deque      : 0.0139 ms
+//  std::deque        : 0.0150 ms
+//
+//[FIFO Stress] Chaotic Push Back / Pop Front - Type: non_copyable (Non-Trivial)
+// with 1000 pushes
+//  Custom Deque      : 0.0225 ms
+//  std::deque        : 0.0204 ms
+//
+// ---------
+//
+//[FIFO Stress] Chaotic Push Back / Pop Front - Type: std::uint32_t (Trivial)
+// with 100000 pushes
+//  Custom Deque      : 1.6298 ms
+//  std::deque        : 1.8436 ms
+//
+//[FIFO Stress] Chaotic Push Back / Pop Front - Type: non_copyable (Non-Trivial)
+// with 100000 pushes
+//  Custom Deque      : 2.3698 ms
+//  std::deque        : 2.1297 ms
+//
+// ---------
+//
+//[FIFO Stress] Chaotic Push Back / Pop Front - Type: std::uint32_t (Trivial)
+// with 1000000 pushes
+//  Custom Deque      : 16.6603 ms
+//  std::deque        : 19.1481 ms
+//
+//[FIFO Stress] Chaotic Push Back / Pop Front - Type: non_copyable (Non-Trivial)
+// with 1000000 pushes
+//  Custom Deque      : 26.6696 ms
+//  std::deque        : 22.1970 ms
+//
 
 #include <algorithm>
 #include <bit>
