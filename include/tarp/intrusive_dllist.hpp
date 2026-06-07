@@ -227,7 +227,7 @@ public:
         node_type *ptr = nullptr;
 
         // used when iterating backward
-        dlnode *prevptr = nullptr;
+        node_type *prevptr = nullptr;
 
         iterator(node_type *node) noexcept : ptr(node) {}
 
